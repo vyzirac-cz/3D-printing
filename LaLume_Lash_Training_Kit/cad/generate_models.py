@@ -38,8 +38,8 @@ PARAMS = {
     "Pin_Depth": 4.0,
     # Curved-Arch Shield parameters (5.5x Lash Oasis scale)
     "Scale_Factor": 5.5,
-    "Arch_Radius": 135.0,         # Horizontal eyelid bend radius (gives ~28-30 mm bend depth over ~175 mm chord)
-    "Upper_Flap_Thickness": 5.0,  # Thin curved upper shell thickness
+    "Arch_Radius": 135.0,         # Horizontal eyelid bend radius (~28-30 mm bend depth over ~175 mm chord)
+    "Upper_Flap_Thickness": 6.0,  # Crisp thin upper flap matching reference diagram
     # Mold parameters
     "Mold_Wall_Thickness": 6.0,
     "Mold_Key_Diameter": 6.0,
@@ -235,79 +235,16 @@ def build_split_pla_lashes(solid_lash, spine):
 
 
 # ==============================================================================
-# 3. CURVED-ARCH 2-ZONE GIANT LASH LIFT SHIELDS (LASH OASIS STYLE)
+# 3. CURVED-ARCH 2-ZONE GIANT LASH LIFT SHIELDS (EXACT REFERENCE PROFILES)
 # ==============================================================================
-def profile_front_n(z_frac, barrel_depth, barrel_frac, flap_t, profile_type):
+def make_arch_section_wire(theta, arch_r, local_h, barrel_depth, barrel_h, flap_t, profile_type):
     """
-    Return radial front protrusion `n` (in mm from the concave back shell n=0)
-    as a function of normalized height `z_frac` in [0, 1].
-    Creates the unmistakable 2-zone Lash Oasis side silhouette:
-      - Distinct lower barrel/wedge (z_frac in [0, barrel_frac])
-      - Thin curved upper flap (n = flap_t) for z_frac > barrel_frac
-    """
-    if profile_type == "Round":
-        # Bright yellow Lash Oasis Round shield:
-        # Full semicircular D-barrel from z_frac=0 to barrel_frac, then thin flap!
-        if z_frac < barrel_frac:
-            s = z_frac / barrel_frac  # 0..1 across barrel height
-            # Semicircle peaking at s=0.5
-            barrel = barrel_depth * math.sqrt(max(0.0, 1.0 - (2.0 * s - 1.0) ** 2))
-            # Smoothly blend with flap_t
-            return max(flap_t, flap_t + (barrel - flap_t) * 1.0)
-        else:
-            return flap_t
-
-    elif profile_type == "Hybrid":
-        # Pale yellow Lash Oasis Hybrid (L/M lift) shield:
-        # Flat-faced angled wedge ramp at bottom (zero undercut in +Z!), transitioning
-        # smoothly via a concave sweep into the thin vertical upper flap!
-        if z_frac <= barrel_frac:
-            s = z_frac / barrel_frac  # 0..1
-            # Slight inward slope from bottom (100% depth) to top of ramp (~82% depth)
-            # then smooth S-curve fillet down to flap_t in the top 30% of the barrel zone
-            if s < 0.68:
-                # Gently angled flat ramp face (100% -> 84%)
-                ramp = barrel_depth * (1.0 - 0.16 * (s / 0.68))
-                return max(flap_t, ramp)
-            else:
-                # Smooth concave transition into upper flap
-                u = (s - 0.68) / 0.32
-                smooth = 0.5 * (1.0 + math.cos(math.pi * u))
-                return flap_t + (barrel_depth * 0.84 - flap_t) * smooth
-        else:
-            return flap_t
-
-    elif profile_type == "Teardrop":
-        # Full lower-to-mid asymmetrical teardrop belly tapering smoothly into thin flap
-        a, b = 1.25, 3.4
-        peak = a / (a + b)
-        raw = (z_frac ** a) * ((1.0 - z_frac) ** b)
-        raw_max = (peak ** a) * ((1.0 - peak) ** b)
-        belly = barrel_depth * (raw / raw_max)
-        # Keep a fuller base so it sits solidly on Z=0
-        base_fill = barrel_depth * 0.55 * max(0.0, 1.0 - z_frac / 0.28)
-        return max(flap_t, belly, base_fill)
-
-    elif profile_type == "Flat":
-        # Korean Step 1 / Flat-Curl: low gentle wedge rim at very bottom + wide thin upper flap
-        if z_frac <= barrel_frac:
-            s = z_frac / barrel_frac
-            smooth = 0.5 * (1.0 + math.cos(math.pi * s))
-            return flap_t + (barrel_depth - flap_t) * (smooth ** 1.2)
-        else:
-            return flap_t
-
-    else:
-        raise ValueError(f"Unknown shield profile_type: {profile_type}")
-
-
-def make_arch_section_wire(theta, arch_r, local_h, barrel_depth, barrel_frac, flap_t, profile_type):
-    """
-    Build a closed cross-section wire in the radial vertical plane at arch angle `theta`.
-    - Back edge: straight vertical line at radial offset n = 0 from z = 0 to z = local_h
-    - Bottom edge: straight horizontal line on z = 0 from n = 0 to n_front(0)
-    - Front curve: smooth 2-zone profile from z = 0 up to z = local_h
-    - Top edge: smooth rounded cap closing front (n=flap_t) to back (n=0) at z = local_h
+    Build an exact geometric closed cross-section wire in the radial vertical plane at angle `theta`,
+    matching the 4 exact technical profiles from IMG_20261124_070159_103.jpg:
+      - Round (Profile 1):      Exact semicircle from (0,0) out to barrel_depth, stepping into thin vertical flap
+      - Teardrop (Profile 2):   Taller, slimmer semi-ellipse from (0,0) up into thin vertical flap
+      - Flat (Profile 3):       Flat horizontal base + rounded corner + vertical front face + rounded top shoulder + flap
+      - Hybrid (Profile 4):     Wide flat base + rounded corner + straight slanted inward ramp + rounded top shoulder + flap
     """
     origin = App.Vector(arch_r * math.sin(theta), arch_r * (math.cos(theta) - 1.0), 0.0)
     n_dir = App.Vector(math.sin(theta), math.cos(theta), 0.0)
@@ -316,72 +253,129 @@ def make_arch_section_wire(theta, arch_r, local_h, barrel_depth, barrel_frac, fl
     def pt(n_val, z_val):
         return origin + n_dir * n_val + z_dir * z_val
 
-    # Sample front profile from z=0 up to z = local_h - flap_t/2
-    n_samples = 30
-    z_top_cap = max(local_h * 0.85, local_h - flap_t * 0.5)
-    front_pts = []
-    for i in range(n_samples + 1):
-        zf = i / n_samples
-        z = zf * z_top_cap
-        n = profile_front_n(zf, barrel_depth, barrel_frac, flap_t, profile_type)
-        front_pts.append(pt(n, z))
+    # Keep flap height strictly > barrel_h so vertical flap edge never degenerates at end tabs
+    h_top = max(local_h, barrel_h + 2.5)
 
-    # Top semicircular cap from front top (flap_t, z_top_cap) over (flap_t/2, local_h) to back (0, z_top_cap)
-    cap_r = flap_t * 0.5
-    p_front_top = front_pts[-1]
-    p_cap_mid = pt(cap_r, local_h)
-    p_back_top = pt(0.0, z_top_cap)
-    p_back_bot = pt(0.0, 0.0)
-    p_front_bot = front_pts[0]
+    if profile_type == "Round":
+        # Diagram Profile 1: Full exact semicircle from (0, 0) through (barrel_depth, bh/2) to (flap_t, bh)
+        # Sample exact elliptical/circular bulge with horizontal tangents at z=0 and z=bh
+        pts = []
+        n_seg = 24
+        for i in range(n_seg + 1):
+            ang = -math.pi / 2.0 + math.pi * (i / n_seg)  # -pi/2 (bottom) to +pi/2 (top)
+            z = barrel_h * 0.5 * (1.0 + math.sin(ang))
+            # Smooth baseline from n=0 at bottom to n=flap_t at top + pure semicircular protrusion
+            base_n = flap_t * (0.5 * (1.0 + math.sin(ang)))
+            bulge = (barrel_depth - 0.5 * flap_t) * math.cos(ang)
+            pts.append(pt(base_n + bulge, z))
+        bs = Part.BSplineCurve()
+        bs.interpolate(pts)
+        e1 = bs.toShape()
+        e2 = Part.makeLine(pt(flap_t, barrel_h), pt(flap_t, h_top))
+        e3 = Part.makeLine(pt(flap_t, h_top), pt(0.0, h_top))
+        e4 = Part.makeLine(pt(0.0, h_top), pt(0.0, 0.0))
+        return Part.Wire([e1, e2, e3, e4])
 
-    bs_front = Part.BSplineCurve()
-    bs_front.interpolate(front_pts)
-    e_front = bs_front.toShape()
-    e_cap = Part.Arc(p_front_top, p_cap_mid, p_back_top).toShape()
-    e_back = Part.makeLine(p_back_top, p_back_bot)
-    e_bot = Part.makeLine(p_back_bot, p_front_bot)
+    elif profile_type == "Teardrop":
+        # Diagram Profile 2: Taller, slimmer semi-ellipse curving smoothly from (0,0) to (flap_t, bh)
+        pts = []
+        n_seg = 24
+        for i in range(n_seg + 1):
+            ang = -math.pi / 2.0 + math.pi * (i / n_seg)
+            z = barrel_h * 0.5 * (1.0 + math.sin(ang))
+            base_n = flap_t * (0.5 * (1.0 + math.sin(ang)))
+            bulge = (barrel_depth - 0.5 * flap_t) * math.cos(ang)
+            pts.append(pt(base_n + bulge, z))
+        bs = Part.BSplineCurve()
+        bs.interpolate(pts)
+        e1 = bs.toShape()
+        e2 = Part.makeLine(pt(flap_t, barrel_h), pt(flap_t, h_top))
+        e3 = Part.makeLine(pt(flap_t, h_top), pt(0.0, h_top))
+        e4 = Part.makeLine(pt(0.0, h_top), pt(0.0, 0.0))
+        return Part.Wire([e1, e2, e3, e4])
 
-    return Part.Wire([e_front, e_cap, e_back, e_bot])
+    elif profile_type == "Flat":
+        # Diagram Profile 3: Flat base + rounded bottom corner + straight vertical front + rounded top shoulder + flap
+        d = max(barrel_depth, flap_t + 8.0)
+        r_b = min(6.0, (d - flap_t) * 0.45, barrel_h * 0.25)
+        r_t = min(6.0, (d - flap_t) * 0.45, barrel_h * 0.25)
+        k = 1.0 - math.sqrt(0.5)
+
+        e1 = Part.makeLine(pt(0.0, 0.0), pt(d - r_b, 0.0))
+        e2 = Part.Arc(pt(d - r_b, 0.0), pt(d - r_b * k, r_b * k), pt(d, r_b)).toShape()
+        e3 = Part.makeLine(pt(d, r_b), pt(d, barrel_h - r_t))
+        e4 = Part.Arc(pt(d, barrel_h - r_t), pt(d - r_t * k, barrel_h - r_t * k), pt(d - r_t, barrel_h)).toShape()
+        e5 = Part.makeLine(pt(d - r_t, barrel_h), pt(flap_t, barrel_h))
+        e6 = Part.makeLine(pt(flap_t, barrel_h), pt(flap_t, h_top))
+        e7 = Part.makeLine(pt(flap_t, h_top), pt(0.0, h_top))
+        e8 = Part.makeLine(pt(0.0, h_top), pt(0.0, 0.0))
+        return Part.Wire([e1, e2, e3, e4, e5, e6, e7, e8])
+
+    elif profile_type == "Hybrid":
+        # Diagram Profile 4: Wide flat base + rounded bottom corner + straight slanted inward ramp + rounded top shoulder + flap
+        d_bot = max(barrel_depth, flap_t + 12.0)
+        d_top = max(flap_t + 7.0, d_bot * 0.72)
+        r_b = min(7.0, (d_bot - flap_t) * 0.40, barrel_h * 0.22)
+        r_t = min(6.0, (d_top - flap_t) * 0.45, barrel_h * 0.22)
+
+        # Slanted ramp direction from (d_bot, r_b) to (d_top, barrel_h - r_t)
+        dn = d_top - d_bot  # negative (slopes inward as z increases)
+        dz = (barrel_h - r_t) - r_b
+        seg_len = math.hypot(dn, dz)
+        # Tangent unit vector along slanted ramp
+        tn, tz = dn / seg_len, dz / seg_len
+
+        # Smooth tangent-ish arc midpoints for bottom & top rounded corners
+        p_b0 = pt(d_bot - r_b, 0.0)
+        p_b1 = pt(d_bot, r_b)
+        p_bm = pt(d_bot - r_b * 0.26, r_b * 0.30)
+
+        p_t0 = pt(d_top, barrel_h - r_t)
+        p_t1 = pt(d_top - r_t, barrel_h)
+        p_tm = pt(d_top - r_t * 0.30, barrel_h - r_t * 0.26)
+
+        e1 = Part.makeLine(pt(0.0, 0.0), p_b0)
+        e2 = Part.Arc(p_b0, p_bm, p_b1).toShape()
+        e3 = Part.makeLine(p_b1, p_t0)
+        e4 = Part.Arc(p_t0, p_tm, p_t1).toShape()
+        e5 = Part.makeLine(p_t1, pt(flap_t, barrel_h))
+        e6 = Part.makeLine(pt(flap_t, barrel_h), pt(flap_t, h_top))
+        e7 = Part.makeLine(pt(flap_t, h_top), pt(0.0, h_top))
+        e8 = Part.makeLine(pt(0.0, h_top), pt(0.0, 0.0))
+        return Part.Wire([e1, e2, e3, e4, e5, e6, e7, e8])
+
+    else:
+        raise ValueError(f"Unknown shield profile_type: {profile_type}")
 
 
 def build_curved_shield(profile_type, chord_len, max_height, barrel_depth, barrel_h):
     """
-    Build a curved-arch 2-zone Lash Oasis style giant shield standing upright on Z=0.
-    Uses 11 radial cross-sections swept/lofted along the eyelid circular arch!
+    Build a curved-arch 2-zone giant shield standing upright on Z=0.
+    Uses 11 radial cross-sections lofted cleanly along the concave eyelid arch!
     """
     arch_r = PARAMS["Arch_Radius"]
     flap_t = PARAMS["Upper_Flap_Thickness"]
     theta_max = math.asin(min(0.95, (chord_len / 2.0) / arch_r))
 
-    # 11 stations along the arch from -1 to +1
     u_stations = [-1.0, -0.88, -0.72, -0.52, -0.28, 0.0, 0.28, 0.52, 0.72, 0.88, 1.0]
     wires = []
 
     for u in u_stations:
         theta = u * theta_max
-
-        # Semicircular upper flap height envelope (just like Lash Oasis: tall dome in center,
-        # sweeping smoothly down to the barrel height at the left & right end tabs!)
-        # For Hybrid, keep slightly asymmetric inner vs outer corner taper
+        # Semicircular upper flap dome (full height in center, sweeping down near left/right ends)
         dome_env = math.sqrt(max(0.0, 1.0 - (min(1.0, abs(u) / 0.90)) ** 2))
-        local_h = barrel_h + (max_height - barrel_h) * (dome_env ** 0.75)
+        local_h = barrel_h + 2.5 + (max_height - barrel_h - 2.5) * (dome_env ** 0.75)
 
-        # Gentle barrel depth taper toward extreme corners (keeps clear side cross-section visible at ends!)
-        if profile_type == "Hybrid" and u < 0:
-            corner_scale = 0.72 + 0.28 * math.cos(0.5 * math.pi * u)
-        else:
-            corner_scale = 0.82 + 0.18 * math.cos(0.5 * math.pi * u)
-
+        # Gentle anatomical depth taper toward corners while keeping crisp readable side profile at ends
+        corner_scale = 0.85 + 0.15 * math.cos(0.5 * math.pi * u)
         local_barrel_d = barrel_depth * corner_scale
-        local_barrel_frac = min(0.92, barrel_h / local_h)
 
         w = make_arch_section_wire(
-            theta, arch_r, local_h, local_barrel_d, local_barrel_frac, flap_t, profile_type
+            theta, arch_r, local_h, local_barrel_d, barrel_h, flap_t, profile_type
         )
         wires.append(w)
 
-    solid = Part.makeLoft(wires, True, False)
-    return solid
+    return Part.makeLoft(wires, True, False)
 
 
 def build_arch_compensator(chord_len=165.0, height=24.0, thickness=5.0):
@@ -560,13 +554,14 @@ def run():
     add_and_export("Lash_LM_Curl_Half_A", lm_half_a, "Lash_LM_Curl_Half_A", pos=(390, -180, 0), color=(0.12, 0.12, 0.14))
     add_and_export("Lash_LM_Curl_Half_B", lm_half_b, "Lash_LM_Curl_Half_B", pos=(540, -180, 0), color=(0.16, 0.16, 0.18))
 
-    print("\n=== Part B: 5 Giant Curved-Arch Lash Lift Shields (Lash Oasis 2-Zone Anatomy) ===")
+    print("\n=== Part B: 5 Giant Curved-Arch Lash Lift Shields (Exact Reference Profiles) ===")
     shield_specs = [
-        # (name, profile_type, chord_len, max_height, barrel_depth, barrel_h, pos, color)
-        ("Shield_Round",       "Round",    170.0, 82.0, 28.0, 38.0, (0,   0, 0), (0.98, 0.80, 0.10)),  # Bright yellow like reel!
-        ("Shield_Hybrid",      "Hybrid",   175.0, 85.0, 26.0, 34.0, (210, 0, 0), (0.96, 0.94, 0.62)),  # Pale yellow like reel!
-        ("Shield_Teardrop",    "Teardrop", 170.0, 85.0, 32.0, 42.0, (420, 0, 0), (0.86, 0.52, 0.65)),
-        ("Shield_Flat_Korean", "Flat",     180.0, 95.0, 16.0, 24.0, (630, 0, 0), (0.52, 0.72, 0.82)),
+        # Ordered left-to-right matching IMG_20261124_070159_103.jpg:
+        # 1. Round (semicircle), 2. Teardrop (slim tall semi-ellipse), 3. Flat (vertical flat), 4. Hybrid (slanted ramp)
+        ("Shield_Round",       "Round",    172.0, 85.0, 30.0, 52.0, (0,   0, 0), (0.98, 0.80, 0.10)),
+        ("Shield_Teardrop",    "Teardrop", 172.0, 85.0, 22.0, 58.0, (210, 0, 0), (0.86, 0.52, 0.65)),
+        ("Shield_Flat_Korean", "Flat",     175.0, 85.0, 23.0, 54.0, (420, 0, 0), (0.52, 0.72, 0.82)),
+        ("Shield_Hybrid",      "Hybrid",   175.0, 85.0, 29.0, 53.0, (630, 0, 0), (0.96, 0.94, 0.62)),
     ]
 
     hybrid_shape = None
