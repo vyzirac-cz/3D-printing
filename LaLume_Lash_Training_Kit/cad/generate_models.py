@@ -1,95 +1,112 @@
 """
-Parametric FreeCAD Generator for LaLume HeadSpa Lash Lift Training Kit
+Parametric FreeCAD Generator for LaLume HeadSpa Lash Lift Training Kit (v2 - Lash Oasis Curved-Arch Anatomy)
 Generates:
-  Part A - Enlarged Lash Models (120 mm, C-curl):
-    - Lash_Flexible_TPU.step (with internal wire channel, >= 1.2 mm min wall)
-    - Lash_Solid_Half_A.step & Lash_Solid_Half_B.step (split matte PLA + 3 filament pin holes)
-  Part B - 5 Giant 5.5x Lash Lift Shields (flat back on Z=0, Multi-Section Loft, no text):
-    - Shield_Round.step
-    - Shield_Teardrop.step
-    - Shield_Hybrid.step
-    - Shield_Flat_Korean.step
-    - Shield_Compensator.step
-  Part C - 2-Part PLA Silicone Casting Mold (for Hybrid shield):
-    - Shield_Mold_PartA.step (cavity half + 4 key recesses + pour spout + 2 air vents)
-    - Shield_Mold_PartB.step (flat lid + 4 alignment keys + matching channels)
+  Part A - Enlarged Lash Models (C-Curl + L/M-Curl for side-by-side demonstration):
+    - Lash_Flexible_TPU.step (C-curl with internal 2.4 mm wire channel, >= 1.2 mm min wall)
+    - Lash_Solid_Half_A.step & Lash_Solid_Half_B.step (C-curl split Matte PLA, flat face on Z=0)
+    - Lash_LM_Curl_Half_A.step & Lash_LM_Curl_Half_B.step (L/M-curl split Matte PLA, flat face on Z=0)
+  Part B - 5 Giant 5.5x Curved-Arch Lash Lift Shields (Lash Oasis 2-zone anatomy, standing on flat Z=0 base):
+    - Shield_Round.step (semicircular D-barrel + thin curved semicircular upper flap)
+    - Shield_Teardrop.step (full lower teardrop belly + thin curved upper flap)
+    - Shield_Hybrid.step (flat-faced angled L/M wedge ramp + thin curved upper flap)
+    - Shield_Flat_Korean.step (low subtle bottom lip + wide tall thin curved flap)
+    - Shield_Compensator.step (arch-matched curved compensator strip with end grip tabs)
+  Part C - 2-Part PLA Silicone Casting Mold (for Curved-Arch Hybrid Shield, zero undercuts):
+    - Shield_Mold_PartA.step (top cavity block + 4 corner key recesses + pour funnel + 2 air vents)
+    - Shield_Mold_PartB.step (flat bottom lid + 4 hemispherical alignment keys + matching channels)
 """
 
 import math
 import os
 import FreeCAD as App
 import Part
+import MeshPart
 
 # ==============================================================================
 # 1. PARAMETERS
 # ==============================================================================
 PARAMS = {
     # Lash parameters
-    "Lash_Length": 120.0,
+    "Lash_Length": 150.0,         # Enlarged teaching lash length (easy to hold against giant shields)
     "Base_Diameter": 12.0,
-    "Tip_Diameter": 1.5,
+    "Tip_Diameter": 1.8,
     "Wire_Diameter": 2.0,
     "Channel_Clearance": 0.4,
     "Tip_Safe_Margin": 8.0,
     "Min_Wall_Thickness": 1.2,
     "Pin_Diameter": 1.85,
     "Pin_Depth": 4.0,
-    # Shield parameters (5.5x scale)
+    # Curved-Arch Shield parameters (5.5x Lash Oasis scale)
     "Scale_Factor": 5.5,
-    "Shield_Length": 175.0,
-    "Shield_Height": 85.0,
-    "Shield_Thickness": 28.0,
-    "Corner_Taper_Ratio": 0.35,
-    "Upper_Flap_Thickness": 4.0,
+    "Arch_Radius": 135.0,         # Horizontal eyelid bend radius (gives ~28-30 mm bend depth over ~175 mm chord)
+    "Upper_Flap_Thickness": 5.0,  # Thin curved upper shell thickness
     # Mold parameters
-    "Mold_Wall_Thickness": 5.0,
+    "Mold_Wall_Thickness": 6.0,
     "Mold_Key_Diameter": 6.0,
     "Mold_Key_Clearance": 0.2,
     "Pour_Spout_Diameter": 8.0,
     "Air_Vent_Diameter": 2.5,
 }
 
-OUT_DIR = "/home/vyzirac/.gemini/antigravity/scratch/lalume_lash_models"
-STEP_DIR = os.path.join(OUT_DIR, "step")
-os.makedirs(STEP_DIR, exist_ok=True)
+REPO_DIR = "/home/vyzirac/git/3D-printing/LaLume_Lash_Training_Kit"
+STEP_DIR = os.path.join(REPO_DIR, "step")
+STL_DIR = os.path.join(REPO_DIR, "stl")
+CAD_DIR = os.path.join(REPO_DIR, "cad")
+for d in (STEP_DIR, STL_DIR, CAD_DIR):
+    os.makedirs(d, exist_ok=True)
 
 
 def validate_solid(name, shape):
-    """Validate that a shape is a clean single solid and print metrics."""
+    """Validate that a shape is a clean single solid and print true tessellated metrics."""
     solids = shape.Solids
     valid = shape.isValid()
     vol = shape.Volume
-    bb = shape.BoundBox
+    verts, _ = shape.tessellate(0.2)
+    xs = [v.x for v in verts]
+    ys = [v.y for v in verts]
+    zs = [v.z for v in verts]
+    dx, dy, dz = max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)
     status = "OK" if (valid and len(solids) == 1 and vol > 0) else "WARN"
     print(
-        f"[{status}] {name}: valid={valid}, solids={len(solids)}, "
-        f"vol={vol:.1f} mm3, bbox=({bb.XLength:.1f} x {bb.YLength:.1f} x {bb.ZLength:.1f}) mm"
+        f"[{status}] {name:24s}: valid={valid}, solids={len(solids)}, "
+        f"vol={vol:8.1f} mm3, true=({dx:5.1f} x {dy:5.1f} x {dz:5.1f}) mm, z_min={min(zs):.2f}"
     )
     return valid and len(solids) >= 1 and vol > 0
 
 
 # ==============================================================================
-# 2. LASH GEOMETRY HELPERS (C-CURL)
+# 2. LASH GEOMETRY HELPERS (C-CURL & L/M-CURL)
 # ==============================================================================
-def build_lash_spine_points(length=120.0, n_pts=40):
+def build_lash_spine(length=150.0, curl_type="C", n_pts=45):
     """
-    Generate a smooth C-curl spine in the XZ plane (Y=0 is symmetry plane)
+    Generate a smooth lash spine in the XZ plane (Y=0 is symmetry plane)
     with exact arc length == `length`.
+      - "C": Classic smooth round C-curl (~110 deg sweep matching the Round shield barrel)
+      - "LM": Flat root base (~25% length), crisp smooth bend (~75 deg), then straight upright shaft
+              (matching the pale yellow Hybrid L/M shield in the Lash Oasis reel!)
     """
-    # Parametric C-curl: tangent angle progresses smoothly from 0 deg at base to ~75 deg at tip
-    # using a slightly accelerating curve (gentle root, graceful curl toward tip)
     raw_pts = []
     ds = 1.0 / (n_pts - 1)
     x, z = 0.0, 0.0
     raw_pts.append(App.Vector(x, 0.0, z))
     for i in range(1, n_pts):
         t = i * ds
-        theta = math.radians(78.0) * (t ** 1.35)
+        if curl_type == "C":
+            # Smooth continuous round curl from 0 deg to ~115 deg
+            theta = math.radians(115.0) * (t ** 1.15)
+        elif curl_type == "LM":
+            # Smooth sigmoid bend concentrated around t in [0.18, 0.42], then straight upward at ~78 deg
+            # Sigmoid transition from 0 to 1
+            s = 1.0 / (1.0 + math.exp(-16.0 * (t - 0.28)))
+            s0 = 1.0 / (1.0 + math.exp(-16.0 * (0.0 - 0.28)))
+            s_norm = (s - s0) / (1.0 - s0)
+            theta = math.radians(78.0) * s_norm
+        else:
+            raise ValueError(f"Unknown curl_type: {curl_type}")
         x += math.cos(theta) * ds
         z += math.sin(theta) * ds
         raw_pts.append(App.Vector(x, 0.0, z))
 
-    # Measure total polyline length and scale to exact `length`
     total_len = sum((raw_pts[i] - raw_pts[i - 1]).Length for i in range(1, len(raw_pts)))
     scale = length / total_len
     pts = [App.Vector(p.x * scale, 0.0, p.z * scale) for p in raw_pts]
@@ -100,38 +117,18 @@ def build_lash_spine_points(length=120.0, n_pts=40):
 
 
 def lash_radius_at(u):
-    """Smooth taper from Base_Diameter/2 at u=0 to Tip_Diameter/2 at u=1."""
     r_base = PARAMS["Base_Diameter"] / 2.0
     r_tip = PARAMS["Tip_Diameter"] / 2.0
     return r_base + (r_tip - r_base) * u
 
 
-def make_normal_circle_wire(center, tangent, radius, ellipticity=1.0):
-    """Create a closed wire (circle or subtle ellipse) perpendicular to `tangent` in XZ plane."""
+def make_normal_circle_wire(center, tangent, radius):
     t_dir = App.Vector(tangent).normalize()
-    y_axis = App.Vector(0, 1, 0)
-    n_dir = y_axis.cross(t_dir).normalize()
-
-    if abs(ellipticity - 1.0) < 1e-6:
-        edge = Part.makeCircle(radius, center, t_dir)
-        return Part.Wire([edge])
-    else:
-        # Subtle ellipse: major along n_dir (in XZ), minor along Y (or vice-versa)
-        pts = []
-        n_seg = 24
-        r_n = radius * math.sqrt(ellipticity)
-        r_y = radius / math.sqrt(ellipticity)
-        for k in range(n_seg):
-            ang = 2.0 * math.pi * k / n_seg
-            p = center + n_dir * (r_n * math.cos(ang)) + y_axis * (r_y * math.sin(ang))
-            pts.append(p)
-        bs = Part.BSplineCurve()
-        bs.interpolate(pts, PeriodicFlag=True)
-        return Part.Wire([bs.toShape()])
+    edge = Part.makeCircle(radius, center, t_dir)
+    return Part.Wire([edge])
 
 
 def build_solid_lash(spine):
-    """Build the solid C-curl lash with smooth taper and spherical dome tip cap."""
     u0, u1 = spine.FirstParameter, spine.LastParameter
     n_sec = 25
     wires = []
@@ -141,45 +138,29 @@ def build_solid_lash(spine):
         pt = spine.value(u)
         tan = spine.tangent(u)[0]
         r = lash_radius_at(frac)
-        wires.append(make_normal_circle_wire(pt, tan, r, ellipticity=1.0))
+        wires.append(make_normal_circle_wire(pt, tan, r))
 
     loft = Part.makeLoft(wires, True, False)
-
-    # Add smooth spherical dome cap at tip
     tip_pt = spine.value(u1)
     tip_r = PARAMS["Tip_Diameter"] / 2.0
     tip_sphere = Part.makeSphere(tip_r, tip_pt)
-    solid = loft.fuse(tip_sphere).removeSplitter()
-    return solid
+    return loft.fuse(tip_sphere).removeSplitter()
 
 
 def build_flexible_tpu_lash(solid_lash, spine):
-    """
-    Create Variant A (Flexible TPU) by cutting an internal wire channel along the spine.
-    Ensures >= Min_Wall_Thickness (1.2 mm) everywhere around the channel.
-    """
     chan_r = (PARAMS["Wire_Diameter"] + PARAMS["Channel_Clearance"]) / 2.0
     min_wall = PARAMS["Min_Wall_Thickness"]
-    min_outer_r = chan_r + min_wall  # 1.2 + 1.2 = 2.4 mm (outer dia 4.8 mm)
+    min_outer_r = chan_r + min_wall
 
-    # Determine safe fractional end along spine
     r_base = PARAMS["Base_Diameter"] / 2.0
     r_tip = PARAMS["Tip_Diameter"] / 2.0
     u_wall_limit = (r_base - min_outer_r) / (r_base - r_tip)
     u_margin_limit = 1.0 - (PARAMS["Tip_Safe_Margin"] / PARAMS["Lash_Length"])
     u_end_frac = min(u_wall_limit, u_margin_limit)
 
-    print(
-        f"  TPU channel: dia={2*chan_r:.2f} mm, wall_limit_frac={u_wall_limit:.3f}, "
-        f"margin_limit_frac={u_margin_limit:.3f} -> stopping at {u_end_frac*100:.1f}% "
-        f"({u_end_frac*PARAMS['Lash_Length']:.1f} mm from base, "
-        f"min outer wall >= {min_wall:.2f} mm)"
-    )
-
     u0, u1 = spine.FirstParameter, spine.LastParameter
     u_end = u0 + (u1 - u0) * u_end_frac
 
-    # Extend channel slightly past base (-2 mm) for clean boolean cut at root
     start_pt = spine.value(u0)
     start_tan = spine.tangent(u0)[0].normalize()
     ext_start = start_pt - start_tan * 2.0
@@ -193,39 +174,35 @@ def build_flexible_tpu_lash(solid_lash, spine):
         chan_wires.append(make_normal_circle_wire(pt, tan, chan_r))
 
     chan_solid = Part.makeLoft(chan_wires, True, False)
-    # Round the blind end of the channel with a hemisphere
     end_sphere = Part.makeSphere(chan_r, spine.value(u_end))
     chan_tool = chan_solid.fuse(end_sphere)
 
-    tpu_lash = solid_lash.cut(chan_tool)
-    return tpu_lash
+    tpu = solid_lash.cut(chan_tool)
+    # Shift so lowest Z is at 0
+    verts, _ = tpu.tessellate(0.2)
+    zmin = min(v.z for v in verts)
+    tpu.translate(App.Vector(0, 0, -zmin))
+    return tpu
 
 
 def build_split_pla_lashes(solid_lash, spine):
     """
-    Create Variant B (Solid Split-in-Half Matte PLA):
-    Splits solid lash on Y=0 into Half_A (Y>=0) and Half_B (Y<=0),
-    adds 3 blind registration pin holes at 25%, 50%, 75% along spine
-    with locally clamped depth so outer wall >= 1.1 mm.
-    Returns (half_a_aligned, half_b_aligned, half_a_print_flat, half_b_print_flat).
+    Split lash on Y=0 into Half A (Y>=0) and Half B (Y<=0), add 3 blind 1.85 mm pin holes,
+    and orient BOTH halves so the flat cut face rests directly on Z=0 with curved body in +Z!
     """
     bb = solid_lash.BoundBox
     pad = 20.0
     box_neg = Part.makeBox(
-        bb.XLength + 2 * pad,
-        bb.YLength + 2 * pad,
-        bb.ZLength + 2 * pad,
+        bb.XLength + 2 * pad, bb.YLength + 2 * pad, bb.ZLength + 2 * pad,
         App.Vector(bb.XMin - pad, -(bb.YLength + 2 * pad), bb.ZMin - pad),
     )
     box_pos = Part.makeBox(
-        bb.XLength + 2 * pad,
-        bb.YLength + 2 * pad,
-        bb.ZLength + 2 * pad,
+        bb.XLength + 2 * pad, bb.YLength + 2 * pad, bb.ZLength + 2 * pad,
         App.Vector(bb.XMin - pad, 0.0, bb.ZMin - pad),
     )
 
-    half_a = solid_lash.cut(box_neg)  # keeps Y >= 0
-    half_b = solid_lash.cut(box_pos)  # keeps Y <= 0
+    half_a = solid_lash.cut(box_neg)  # Y >= 0
+    half_b = solid_lash.cut(box_pos)  # Y <= 0
 
     pin_r = PARAMS["Pin_Diameter"] / 2.0
     target_depth = PARAMS["Pin_Depth"]
@@ -235,296 +212,306 @@ def build_split_pla_lashes(solid_lash, spine):
         u = u0 + (u1 - u0) * frac
         pt = spine.value(u)
         local_r = lash_radius_at(frac)
-        # Keep >= 1.1 mm outer wall so hole never pierces skin
-        safe_depth = max(0.8, min(target_depth, local_r - 1.1))
-        print(
-            f"  PLA pin at {int(frac*100)}%: local_r={local_r:.2f} mm -> "
-            f"hole depth={safe_depth:.2f} mm (outer wall={local_r - safe_depth:.2f} mm)"
-        )
-        # Cut into Half A (+Y direction from Y=-0.5 to Y=+safe_depth)
+        safe_depth = max(0.9, min(target_depth, local_r - 1.1))
         pin_a = Part.makeCylinder(
             pin_r, safe_depth + 0.5, App.Vector(pt.x, -0.5, pt.z), App.Vector(0, 1, 0)
         )
         half_a = half_a.cut(pin_a)
 
-        # Cut into Half B (-Y direction from Y=+0.5 to Y=-safe_depth)
         pin_b = Part.makeCylinder(
             pin_r, safe_depth + 0.5, App.Vector(pt.x, 0.5, pt.z), App.Vector(0, -1, 0)
         )
         half_b = half_b.cut(pin_b)
 
-    # Also prepare print-ready flat orientations (cut face resting on Z=0)
-    # Half A has flat face on Y=0 with solid in +Y -> rotate -90 deg around X so +Y becomes +Z
+    # Rotate so flat cut face sits on Z=0 and curved body extends UP into +Z!
+    # Half A has solid in +Y -> rotate +90 deg around X sends +Y to +Z!
     half_a_flat = half_a.copy()
-    half_a_flat.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), -90)
-    # Half B has flat face on Y=0 with solid in -Y -> rotate +90 deg around X so -Y becomes +Z
+    half_a_flat.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 90)
+    # Half B has solid in -Y -> rotate -90 deg around X sends -Y to +Z!
     half_b_flat = half_b.copy()
-    half_b_flat.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 90)
+    half_b_flat.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), -90)
 
-    return half_a, half_b, half_a_flat, half_b_flat
+    return half_a_flat, half_b_flat
 
 
 # ==============================================================================
-# 3. GIANT 5.5x LASH LIFT SHIELDS (MULTI-SECTION LOFT, FLAT BACK ON Z=0)
+# 3. CURVED-ARCH 2-ZONE GIANT LASH LIFT SHIELDS (LASH OASIS STYLE)
 # ==============================================================================
-def shield_profile_z(v, thickness, flap_t, profile_type):
+def profile_front_n(z_frac, barrel_depth, barrel_frac, flap_t, profile_type):
     """
-    Return Z height (bulge above flat back Z=0) for normalized height v in [0, 1]
-    from bottom eyelid edge (v=0) to top flap edge (v=1).
-    Ensures smooth C1/C2 organic shape with Z=0 at v=0 and v=1 (via rounded lips).
+    Return radial front protrusion `n` (in mm from the concave back shell n=0)
+    as a function of normalized height `z_frac` in [0, 1].
+    Creates the unmistakable 2-zone Lash Oasis side silhouette:
+      - Distinct lower barrel/wedge (z_frac in [0, barrel_frac])
+      - Thin curved upper flap (n = flap_t) for z_frac > barrel_frac
     """
-    # Smooth end-rounding envelope at bottom (v=0) and top (v=1)
-    if v <= 0.0 or v >= 1.0:
-        return 0.0
-
     if profile_type == "Round":
-        # Classic symmetric semi-elliptical barrel peaking near v=0.45, tapering into flap
-        barrel = math.sin(math.pi * (v ** 0.85))
-        z = thickness * (barrel ** 0.85)
-        # Ensure upper flap maintains minimum thickness before top lip
-        flap = flap_t * math.sin(math.pi * v) ** 0.4
-        return max(z, flap)
-
-    elif profile_type == "Teardrop":
-        # Full lower-to-mid belly peaking around v=0.28, sweeping down to thin upper flap
-        # Beta-like curve peaking at v = a/(a+b)
-        a, b = 1.35, 3.3
-        peak_v = a / (a + b)
-        raw = (v ** a) * ((1.0 - v) ** b)
-        raw_max = (peak_v ** a) * ((1.0 - peak_v) ** b)
-        belly = thickness * (raw / raw_max)
-        flap = flap_t * (math.sin(math.pi * v) ** 0.35)
-        return max(belly, flap)
+        # Bright yellow Lash Oasis Round shield:
+        # Full semicircular D-barrel from z_frac=0 to barrel_frac, then thin flap!
+        if z_frac < barrel_frac:
+            s = z_frac / barrel_frac  # 0..1 across barrel height
+            # Semicircle peaking at s=0.5
+            barrel = barrel_depth * math.sqrt(max(0.0, 1.0 - (2.0 * s - 1.0) ** 2))
+            # Smoothly blend with flap_t
+            return max(flap_t, flap_t + (barrel - flap_t) * 1.0)
+        else:
+            return flap_t
 
     elif profile_type == "Hybrid":
-        # Anatomical: slightly straighter root lift, soft rounded apex at v~0.36, smooth upper flap
-        a, b = 1.6, 2.7
-        peak_v = a / (a + b)
-        raw = (v ** a) * ((1.0 - v) ** b)
-        raw_max = (peak_v ** a) * ((1.0 - peak_v) ** b)
-        belly = thickness * (raw / raw_max)
-        flap = flap_t * (math.sin(math.pi * v) ** 0.35)
-        return max(belly, flap)
+        # Pale yellow Lash Oasis Hybrid (L/M lift) shield:
+        # Flat-faced angled wedge ramp at bottom (zero undercut in +Z!), transitioning
+        # smoothly via a concave sweep into the thin vertical upper flap!
+        if z_frac <= barrel_frac:
+            s = z_frac / barrel_frac  # 0..1
+            # Slight inward slope from bottom (100% depth) to top of ramp (~82% depth)
+            # then smooth S-curve fillet down to flap_t in the top 30% of the barrel zone
+            if s < 0.68:
+                # Gently angled flat ramp face (100% -> 84%)
+                ramp = barrel_depth * (1.0 - 0.16 * (s / 0.68))
+                return max(flap_t, ramp)
+            else:
+                # Smooth concave transition into upper flap
+                u = (s - 0.68) / 0.32
+                smooth = 0.5 * (1.0 + math.cos(math.pi * u))
+                return flap_t + (barrel_depth * 0.84 - flap_t) * smooth
+        else:
+            return flap_t
+
+    elif profile_type == "Teardrop":
+        # Full lower-to-mid asymmetrical teardrop belly tapering smoothly into thin flap
+        a, b = 1.25, 3.4
+        peak = a / (a + b)
+        raw = (z_frac ** a) * ((1.0 - z_frac) ** b)
+        raw_max = (peak ** a) * ((1.0 - peak) ** b)
+        belly = barrel_depth * (raw / raw_max)
+        # Keep a fuller base so it sits solidly on Z=0
+        base_fill = barrel_depth * 0.55 * max(0.0, 1.0 - z_frac / 0.28)
+        return max(flap_t, belly, base_fill)
 
     elif profile_type == "Flat":
-        # Korean Step 1 / L-curl: prominent low barrel at bottom (v~0.16), wide very thin flat upper flap
-        a, b = 1.15, 6.2
-        peak_v = a / (a + b)
-        raw = (v ** a) * ((1.0 - v) ** b)
-        raw_max = (peak_v ** a) * ((1.0 - peak_v) ** b)
-        rim = thickness * (raw / raw_max)
-        # Wide flat upper flap (~flap_t = 4 mm) smoothly tapering to top edge
-        flap = flap_t * (math.sin(math.pi * v) ** 0.25)
-        return max(rim, flap)
+        # Korean Step 1 / Flat-Curl: low gentle wedge rim at very bottom + wide thin upper flap
+        if z_frac <= barrel_frac:
+            s = z_frac / barrel_frac
+            smooth = 0.5 * (1.0 + math.cos(math.pi * s))
+            return flap_t + (barrel_depth - flap_t) * (smooth ** 1.2)
+        else:
+            return flap_t
 
     else:
         raise ValueError(f"Unknown shield profile_type: {profile_type}")
 
 
-def make_shield_section_wire(x_pos, y_base, height, thickness, flap_t, profile_type):
+def make_arch_section_wire(theta, arch_r, local_h, barrel_depth, barrel_frac, flap_t, profile_type):
     """
-    Build a closed YZ cross-section wire at X = x_pos with:
-    - Smooth B-spline upper/front surface (Z >= 0)
-    - Flat straight back edge along Z = 0 from top back to bottom
+    Build a closed cross-section wire in the radial vertical plane at arch angle `theta`.
+    - Back edge: straight vertical line at radial offset n = 0 from z = 0 to z = local_h
+    - Bottom edge: straight horizontal line on z = 0 from n = 0 to n_front(0)
+    - Front curve: smooth 2-zone profile from z = 0 up to z = local_h
+    - Top edge: smooth rounded cap closing front (n=flap_t) to back (n=0) at z = local_h
     """
-    n_pts = 28
-    pts = []
-    # Sample from v=0 (bottom) to v=1 (top) with extra density near ends for smooth rounded lips
-    for i in range(n_pts + 1):
-        # Cosine spacing gives smoother rounding at v=0 and v=1
-        v = 0.5 * (1.0 - math.cos(math.pi * i / n_pts))
-        y = y_base + height * v
-        z = shield_profile_z(v, thickness, flap_t, profile_type)
-        pts.append(App.Vector(x_pos, y, z))
+    origin = App.Vector(arch_r * math.sin(theta), arch_r * (math.cos(theta) - 1.0), 0.0)
+    n_dir = App.Vector(math.sin(theta), math.cos(theta), 0.0)
+    z_dir = App.Vector(0.0, 0.0, 1.0)
 
-    bs = Part.BSplineCurve()
-    bs.interpolate(pts)
-    front_edge = bs.toShape()
+    def pt(n_val, z_val):
+        return origin + n_dir * n_val + z_dir * z_val
 
-    # Straight flat back edge on Z = 0 closing top back to bottom
-    back_edge = Part.makeLine(pts[-1], pts[0])
-    wire = Part.Wire([front_edge, back_edge])
-    return wire
+    # Sample front profile from z=0 up to z = local_h - flap_t/2
+    n_samples = 30
+    z_top_cap = max(local_h * 0.85, local_h - flap_t * 0.5)
+    front_pts = []
+    for i in range(n_samples + 1):
+        zf = i / n_samples
+        z = zf * z_top_cap
+        n = profile_front_n(zf, barrel_depth, barrel_frac, flap_t, profile_type)
+        front_pts.append(pt(n, z))
+
+    # Top semicircular cap from front top (flap_t, z_top_cap) over (flap_t/2, local_h) to back (0, z_top_cap)
+    cap_r = flap_t * 0.5
+    p_front_top = front_pts[-1]
+    p_cap_mid = pt(cap_r, local_h)
+    p_back_top = pt(0.0, z_top_cap)
+    p_back_bot = pt(0.0, 0.0)
+    p_front_bot = front_pts[0]
+
+    bs_front = Part.BSplineCurve()
+    bs_front.interpolate(front_pts)
+    e_front = bs_front.toShape()
+    e_cap = Part.Arc(p_front_top, p_cap_mid, p_back_top).toShape()
+    e_back = Part.makeLine(p_back_top, p_back_bot)
+    e_bot = Part.makeLine(p_back_bot, p_front_bot)
+
+    return Part.Wire([e_front, e_cap, e_back, e_bot])
 
 
-def build_giant_shield(profile_type, length, height, thickness):
+def build_curved_shield(profile_type, chord_len, max_height, barrel_depth, barrel_h):
     """
-    Build an organic giant lash lift shield using Multi-Section Loft across 9 sections
-    with smooth corner taper (Corner_Taper_Ratio = 0.35) and flat back on Z = 0.
+    Build a curved-arch 2-zone Lash Oasis style giant shield standing upright on Z=0.
+    Uses 11 radial cross-sections swept/lofted along the eyelid circular arch!
     """
-    taper_min = PARAMS["Corner_Taper_Ratio"]
+    arch_r = PARAMS["Arch_Radius"]
     flap_t = PARAMS["Upper_Flap_Thickness"]
+    theta_max = math.asin(min(0.95, (chord_len / 2.0) / arch_r))
 
-    # Normalized X stations u in [-1, 1]
-    # Keep end stations very slightly inset from ±1.0 so loft sections are well-formed
-    u_stations = [-0.98, -0.88, -0.70, -0.40, 0.0, 0.40, 0.70, 0.88, 0.98]
+    # 11 stations along the arch from -1 to +1
+    u_stations = [-1.0, -0.88, -0.72, -0.52, -0.28, 0.0, 0.28, 0.52, 0.72, 0.88, 1.0]
     wires = []
 
     for u in u_stations:
-        x = u * (length / 2.0)
+        theta = u * theta_max
 
-        # Smooth almond/half-moon envelope: 1.0 at center, smoothly tapering toward corners
-        # For Hybrid, make inner corner (u<0) slightly sleeker (anatomical asymmetry)
-        local_taper_min = taper_min
+        # Semicircular upper flap height envelope (just like Lash Oasis: tall dome in center,
+        # sweeping smoothly down to the barrel height at the left & right end tabs!)
+        # For Hybrid, keep slightly asymmetric inner vs outer corner taper
+        dome_env = math.sqrt(max(0.0, 1.0 - (min(1.0, abs(u) / 0.90)) ** 2))
+        local_h = barrel_h + (max_height - barrel_h) * (dome_env ** 0.75)
+
+        # Gentle barrel depth taper toward extreme corners (keeps clear side cross-section visible at ends!)
         if profile_type == "Hybrid" and u < 0:
-            local_taper_min = taper_min * 0.85
+            corner_scale = 0.72 + 0.28 * math.cos(0.5 * math.pi * u)
+        else:
+            corner_scale = 0.82 + 0.18 * math.cos(0.5 * math.pi * u)
 
-        # Smooth cosine-bell envelope
-        env = local_taper_min + (1.0 - local_taper_min) * (math.cos(0.5 * math.pi * u) ** 0.75)
+        local_barrel_d = barrel_depth * corner_scale
+        local_barrel_frac = min(0.92, barrel_h / local_h)
 
-        # Near extreme tips (|u| = 0.98), close down cleanly for rounded corners
-        tip_round = math.sqrt(max(0.02, 1.0 - (u ** 4)))
-        local_h = height * env * (0.45 + 0.55 * tip_round)
-        local_t = thickness * env * (0.35 + 0.65 * tip_round)
-        local_flap = min(flap_t, local_t * 0.6)
-
-        # Subtle anatomical eyelid arch along the bottom edge (rises ~6 mm toward corners)
-        y_base = 6.0 * (u ** 2)
-
-        w = make_shield_section_wire(x, y_base, local_h, local_t, local_flap, profile_type)
+        w = make_arch_section_wire(
+            theta, arch_r, local_h, local_barrel_d, local_barrel_frac, flap_t, profile_type
+        )
         wires.append(w)
 
     solid = Part.makeLoft(wires, True, False)
     return solid
 
 
-def build_compensator_strip(length=165.0, height=25.0, thickness=5.0):
+def build_arch_compensator(chord_len=165.0, height=24.0, thickness=5.0):
     """
-    Build Profile 5: Compensator Strip (165 x 25 x 5 mm)
-    Thin gently arched demonstration strip with subtle rounded grip tabs at both ends.
-    Uses exact stadium (2 lines + 2 semicircular arcs) cross-sections so the loft is 100% valid.
+    Build Profile 5: Arch-matched Compensator Strip that nests snugly over the front
+    of the curved giant shields during class demonstrations, standing on Z=0.
     """
-    u_stations = [-1.0, -0.88, -0.75, -0.45, 0.0, 0.45, 0.75, 0.88, 1.0]
+    arch_r = PARAMS["Arch_Radius"] + 16.0  # nests smoothly outside the shield front surface
+    theta_max = math.asin(min(0.95, (chord_len / 2.0) / arch_r))
+
+    u_stations = [-1.0, -0.86, -0.70, -0.40, 0.0, 0.40, 0.70, 0.86, 1.0]
     wires = []
 
     for u in u_stations:
-        x = u * (length / 2.0)
-        # Gentle arch along X (curving in +Z by ~12 mm at center so it drapes over a shield)
-        z_arch = 12.0 * (1.0 - u ** 2)
-        # Slightly wider grip tabs at the ends (|u| >= 0.88)
-        if abs(u) >= 0.88:
-            local_h = height * 1.15
-            local_t = thickness * 1.1
-        else:
-            local_h = height * (0.92 + 0.08 * (1.0 - u ** 2))
-            local_t = thickness
+        theta = u * theta_max
+        origin = App.Vector(arch_r * math.sin(theta), arch_r * (math.cos(theta) - 1.0), 0.0)
+        n_dir = App.Vector(math.sin(theta), math.cos(theta), 0.0)
+        z_dir = App.Vector(0.0, 0.0, 1.0)
 
-        r = local_t / 2.0
-        half_flat = max(1.0, (local_h / 2.0) - r)
-        zc = z_arch + r
+        # Subtle wider grip tabs at both ends (|u| >= 0.86)
+        local_h = height * (1.20 if abs(u) >= 0.86 else 1.0)
+        r = thickness / 2.0
 
-        # 4 corner points + 2 arc midpoints in YZ plane (consistent CCW order)
-        p_top_front = App.Vector(x, half_flat, zc + r)
-        p_top_mid = App.Vector(x, half_flat + r, zc)
-        p_top_back = App.Vector(x, half_flat, zc - r)
-        p_bot_back = App.Vector(x, -half_flat, zc - r)
-        p_bot_mid = App.Vector(x, -half_flat - r, zc)
-        p_bot_front = App.Vector(x, -half_flat, zc + r)
+        def pt(n_val, z_val):
+            return origin + n_dir * n_val + z_dir * z_val
 
-        e1 = Part.Arc(p_top_front, p_top_mid, p_top_back).toShape()
-        e2 = Part.makeLine(p_top_back, p_bot_back)
-        e3 = Part.Arc(p_bot_back, p_bot_mid, p_bot_front).toShape()
-        e4 = Part.makeLine(p_bot_front, p_top_front)
+        # Flat bottom on Z=0, rounded top cap, uniform thickness
+        p_b0 = pt(0.0, 0.0)
+        p_b1 = pt(thickness, 0.0)
+        p_t1 = pt(thickness, local_h - r)
+        p_tm = pt(r, local_h)
+        p_t0 = pt(0.0, local_h - r)
+
+        e1 = Part.makeLine(p_b0, p_b1)
+        e2 = Part.makeLine(p_b1, p_t1)
+        e3 = Part.Arc(p_t1, p_tm, p_t0).toShape()
+        e4 = Part.makeLine(p_t0, p_b0)
         wires.append(Part.Wire([e1, e2, e3, e4]))
 
-    solid = Part.makeLoft(wires, True, False)
-    bb = solid.BoundBox
-    solid.translate(App.Vector(0, -bb.YMin, -bb.ZMin))
-    return solid
+    return Part.makeLoft(wires, True, False)
 
 
 # ==============================================================================
-# 4. 2-PART PLA SILICONE CASTING MOLD (FOR HYBRID SHIELD)
+# 4. 2-PART PLA SILICONE CASTING MOLD (FOR CURVED-ARCH HYBRID SHIELD)
 # ==============================================================================
-def build_silicone_mold(shield_solid):
+def build_curved_silicone_mold(shield_solid):
     """
-    Build a 2-part PLA silicone casting mold around `shield_solid` (whose flat back is on Z=0):
-      - Part A (Z >= 0): Cavity block with shield subtracted, 4 corner key recesses,
-        half pour-spout channel (+Y top edge), and 2 half air-vent channels (+Y left/right).
-      - Part B (Z <= 0): Flat lid plate with 4 protruding hemispherical alignment keys
-        and matching half pour-spout + air-vent channels.
-    Zero undercuts -> clean demolding!
+    Build a zero-undercut 2-part PLA silicone casting mold for the curved-arch Hybrid shield:
+      - Part A (Top Cavity Block, Z >= 0): Enclosing block with shield subtracted.
+        Since Hybrid tapers inward as Z increases, Part A lifts straight UP off the silicone!
+        Flipped upside-down for export so the flat outer top rests on Z=0 and cavity opens UP!
+      - Part B (Flat Bottom Lid, Z <= 0): Seals the flat Z=0 base of the shield with 4 corner
+        hemispherical alignment keys, 8 mm pour funnel, and 2 x 2.5 mm air vents at the top of Part A.
     """
-    bb = shield_solid.BoundBox
+    verts, _ = shield_solid.tessellate(0.2)
+    xmin, xmax = min(v.x for v in verts), max(v.x for v in verts)
+    ymin, ymax = min(v.y for v in verts), max(v.y for v in verts)
+    zmax = max(v.z for v in verts)
+
     wall = max(PARAMS["Mold_Wall_Thickness"], 6.0)
     xy_margin = 16.0  # room for wall + 6 mm alignment keys in the 4 corners
     lid_thick = 8.0
 
-    x_min = bb.XMin - xy_margin
-    x_max = bb.XMax + xy_margin
-    y_min = bb.YMin - xy_margin
-    y_max = bb.YMax + xy_margin
-    z_top = bb.ZMax + wall
+    bx0, bx1 = xmin - xy_margin, xmax + xy_margin
+    by0, by1 = ymin - xy_margin, ymax + xy_margin
+    bw = bx1 - bx0
+    bh = by1 - by0
+    bz = zmax + wall
 
-    block_w = x_max - x_min
-    block_h = y_max - y_min
-
-    # --- Part A: Cavity half (Z from 0 to z_top) ---
-    block_a = Part.makeBox(block_w, block_h, z_top, App.Vector(x_min, y_min, 0.0))
+    # Part A: Cavity block (Z from 0 to bz)
+    block_a = Part.makeBox(bw, bh, bz, App.Vector(bx0, by0, 0.0))
     part_a = block_a.cut(shield_solid)
 
-    # --- Part B: Flat lid half (Z from -lid_thick to 0) ---
-    part_b = Part.makeBox(block_w, block_h, lid_thick, App.Vector(x_min, y_min, -lid_thick))
+    # Part B: Flat bottom lid (Z from -lid_thick to 0)
+    part_b = Part.makeBox(bw, bh, lid_thick, App.Vector(bx0, by0, -lid_thick))
 
-    # --- 4 Corner Alignment Keys (hemispheres on Z=0 parting plane) ---
+    # 4 Corner Alignment Keys on Z = 0 parting plane
     key_r = PARAMS["Mold_Key_Diameter"] / 2.0
-    key_recess_r = (PARAMS["Mold_Key_Diameter"] + PARAMS["Mold_Key_Clearance"]) / 2.0
+    recess_r = (PARAMS["Mold_Key_Diameter"] + PARAMS["Mold_Key_Clearance"]) / 2.0
     inset = 8.0
-    key_positions = [
-        App.Vector(x_min + inset, y_min + inset, 0.0),
-        App.Vector(x_max - inset, y_min + inset, 0.0),
-        App.Vector(x_min + inset, y_max - inset, 0.0),
-        App.Vector(x_max - inset, y_max - inset, 0.0),
+    key_pts = [
+        App.Vector(bx0 + inset, by0 + inset, 0.0),
+        App.Vector(bx1 - inset, by0 + inset, 0.0),
+        App.Vector(bx0 + inset, by1 - inset, 0.0),
+        App.Vector(bx1 - inset, by1 - inset, 0.0),
     ]
-    for kp in key_positions:
-        # Protruding hemisphere on Part B (+Z into Part A)
-        key_sphere = Part.makeSphere(key_r, kp)
-        part_b = part_b.fuse(key_sphere)
-        # Matching slightly oversized recess in Part A
-        recess_sphere = Part.makeSphere(key_recess_r, kp)
-        part_a = part_a.cut(recess_sphere)
+    for kp in key_pts:
+        part_b = part_b.fuse(Part.makeSphere(key_r, kp))
+        part_a = part_a.cut(Part.makeSphere(recess_r, kp))
 
-    # --- Pour Spout (center top +Y) & 2 Air Vents (left & right +Y) ---
-    # Placed along the parting plane Z = 0, running from inside the upper shield cavity
-    # straight out through the +Y outer wall so the clamped mold stands upright on its -Y base!
+    # Pour Spout (8.0 mm + funnel) through the TOP of Part A at X=0, Y=2.5 mm (right into top flap apex!)
     spout_r = PARAMS["Pour_Spout_Diameter"] / 2.0
-    vent_r = PARAMS["Air_Vent_Diameter"] / 2.0
-
-    # Pour spout at X = 0, entering cavity by 10 mm and exiting through y_max + 2 mm
-    spout_y_start = bb.YMax - 10.0
-    spout_len = (y_max + 2.0) - spout_y_start
+    spout_y = 2.5
+    spout_z0 = zmax - 12.0
     spout_cyl = Part.makeCylinder(
-        spout_r, spout_len, App.Vector(0.0, spout_y_start, 0.0), App.Vector(0, 1, 0)
+        spout_r, (bz + 2.0) - spout_z0, App.Vector(0.0, spout_y, spout_z0), App.Vector(0, 0, 1)
     )
-    # Add a small conical funnel at the outer mouth of the pour spout
-    funnel_len = 6.0
     funnel = Part.makeCone(
-        spout_r,
-        spout_r + 3.5,
-        funnel_len,
-        App.Vector(0.0, y_max - funnel_len + 0.5, 0.0),
-        App.Vector(0, 1, 0),
+        spout_r, spout_r + 3.5, 5.0, App.Vector(0.0, spout_y, bz - 4.5), App.Vector(0, 0, 1)
     )
-    spout_tool = spout_cyl.fuse(funnel)
-    part_a = part_a.cut(spout_tool)
-    part_b = part_b.cut(spout_tool)
+    part_a = part_a.cut(spout_cyl.fuse(funnel))
 
-    # 2 Air vents at X = ±0.35 * shield_length, entering cavity and exiting through y_max + 2 mm
-    vent_x_offset = 0.32 * (bb.XMax - bb.XMin)
-    for sx in (-vent_x_offset, vent_x_offset):
-        vent_y_start = bb.YMax - 22.0
-        vent_len = (y_max + 2.0) - vent_y_start
+    # 2 Air Vents (2.5 mm) at left & right upper arch shoulders leading straight up through top of Part A
+    vent_r = PARAMS["Air_Vent_Diameter"] / 2.0
+    arch_r = PARAMS["Arch_Radius"]
+    for sign in (-1.0, 1.0):
+        th = sign * math.radians(24.0)
+        vx = (arch_r + 3.0) * math.sin(th)
+        vy = (arch_r + 3.0) * math.cos(th) - arch_r
         vent_cyl = Part.makeCylinder(
-            vent_r, vent_len, App.Vector(sx, vent_y_start, 0.0), App.Vector(0, 1, 0)
+            vent_r, bz + 2.0 - 20.0, App.Vector(vx, vy, 20.0), App.Vector(0, 0, 1)
         )
         part_a = part_a.cut(vent_cyl)
-        part_b = part_b.cut(vent_cyl)
 
-    return part_a, part_b
+    # Orient Part A upside-down (cavity opening UP, flat outer top on Z=0) for clean printing & inspection
+    part_a_print = part_a.copy()
+    part_a_print.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 180)
+    va, _ = part_a_print.tessellate(0.2)
+    part_a_print.translate(App.Vector(0, -min(v.y for v in va), -min(v.z for v in va)))
+
+    # Orient Part B with flat outer bottom on Z=0 and alignment keys pointing UP (+Z)
+    part_b_print = part_b.copy()
+    vb, _ = part_b_print.tessellate(0.2)
+    part_b_print.translate(App.Vector(0, -min(v.y for v in vb), -min(v.z for v in vb)))
+
+    return part_a_print, part_b_print
 
 
 # ==============================================================================
-# 5. MAIN DOCUMENT GENERATION & STEP EXPORT
+# 5. MAIN GENERATION + STEP & STL EXPORT
 # ==============================================================================
 def run():
     doc_name = "LaLume_Lash_Training_Kit"
@@ -532,7 +519,7 @@ def run():
         App.closeDocument(doc_name)
     doc = App.newDocument(doc_name)
 
-    # Add parametric Spreadsheet
+    # Parametric Spreadsheet
     sheet = doc.addObject("Spreadsheet::Sheet", "Parameters")
     sheet.set("A1", "Parameter")
     sheet.set("B1", "Value")
@@ -541,113 +528,66 @@ def run():
         sheet.set(f"B{idx}", str(v))
     doc.recompute()
 
-    exported = []
-
-    def add_and_export(name, shape, step_filename, pos=(0, 0, 0), color=(0.25, 0.25, 0.28)):
-        valid = validate_solid(name, shape)
-        # Export in clean local print-ready coordinates BEFORE layout shift
-        step_path = os.path.join(STEP_DIR, step_filename)
+    def add_and_export(name, shape, base_filename, pos=(0, 0, 0), color=(0.25, 0.25, 0.28)):
+        validate_solid(name, shape)
+        step_path = os.path.join(STEP_DIR, base_filename + ".step")
+        stl_path = os.path.join(STL_DIR, base_filename + ".stl")
         shape.exportStep(step_path)
-        exported.append((name, step_path, valid))
+        mesh = MeshPart.meshFromShape(Shape=shape, LinearDeflection=0.1, AngularDeflection=0.2, Relative=False)
+        mesh.write(stl_path)
 
-        # Add to FreeCAD document with nice visual layout spacing
         obj = doc.addObject("Part::Feature", name)
-        display_shape = shape.copy()
-        display_shape.translate(App.Vector(*pos))
-        obj.Shape = display_shape
+        disp = shape.copy()
+        disp.translate(App.Vector(*pos))
+        obj.Shape = disp
         if App.GuiUp and obj.ViewObject:
             obj.ViewObject.ShapeColor = color
         return obj
 
-    print("=== Generating Part A: Lash Models (C-Curl) ===")
-    spine = build_lash_spine_points(PARAMS["Lash_Length"])
-    solid_lash = build_solid_lash(spine)
-    validate_solid("Lash_Solid_Full_Internal", solid_lash)
+    print("=== Part A: Enlarged Teaching Lashes (C-Curl + L/M-Curl) ===")
+    c_spine = build_lash_spine(PARAMS["Lash_Length"], "C")
+    c_solid = build_solid_lash(c_spine)
+    tpu_lash = build_flexible_tpu_lash(c_solid, c_spine)
+    add_and_export("Lash_Flexible_TPU", tpu_lash, "Lash_Flexible_TPU", pos=(-60, -180, 0), color=(0.18, 0.20, 0.24))
 
-    tpu_lash = build_flexible_tpu_lash(solid_lash, spine)
-    add_and_export(
-        "Lash_Flexible_TPU",
-        tpu_lash,
-        "Lash_Flexible_TPU.step",
-        pos=(0, -140, 0),
-        color=(0.22, 0.24, 0.28),
-    )
+    c_half_a, c_half_b = build_split_pla_lashes(c_solid, c_spine)
+    add_and_export("Lash_Solid_Half_A", c_half_a, "Lash_Solid_Half_A", pos=(90, -180, 0), color=(0.12, 0.12, 0.14))
+    add_and_export("Lash_Solid_Half_B", c_half_b, "Lash_Solid_Half_B", pos=(240, -180, 0), color=(0.16, 0.16, 0.18))
 
-    _, _, half_a_flat, half_b_flat = build_split_pla_lashes(solid_lash, spine)
-    add_and_export(
-        "Lash_Solid_Half_A",
-        half_a_flat,
-        "Lash_Solid_Half_A.step",
-        pos=(140, -140, 0),
-        color=(0.15, 0.15, 0.17),
-    )
-    add_and_export(
-        "Lash_Solid_Half_B",
-        half_b_flat,
-        "Lash_Solid_Half_B.step",
-        pos=(280, -140, 0),
-        color=(0.18, 0.18, 0.20),
-    )
+    lm_spine = build_lash_spine(PARAMS["Lash_Length"], "LM")
+    lm_solid = build_solid_lash(lm_spine)
+    lm_half_a, lm_half_b = build_split_pla_lashes(lm_solid, lm_spine)
+    add_and_export("Lash_LM_Curl_Half_A", lm_half_a, "Lash_LM_Curl_Half_A", pos=(390, -180, 0), color=(0.12, 0.12, 0.14))
+    add_and_export("Lash_LM_Curl_Half_B", lm_half_b, "Lash_LM_Curl_Half_B", pos=(540, -180, 0), color=(0.16, 0.16, 0.18))
 
-    print("\n=== Generating Part B: 5 Giant 5.5x Lash Lift Shields ===")
+    print("\n=== Part B: 5 Giant Curved-Arch Lash Lift Shields (Lash Oasis 2-Zone Anatomy) ===")
     shield_specs = [
-        ("Shield_Round", "Round", 170.0, 80.0, 28.0, "Shield_Round.step", (0, 0, 0), (0.85, 0.55, 0.65)),
-        ("Shield_Teardrop", "Teardrop", 170.0, 85.0, 32.0, "Shield_Teardrop.step", (200, 0, 0), (0.78, 0.48, 0.62)),
-        ("Shield_Hybrid", "Hybrid", 175.0, 85.0, 26.0, "Shield_Hybrid.step", (400, 0, 0), (0.65, 0.52, 0.78)),
-        ("Shield_Flat_Korean", "Flat", 180.0, 95.0, 18.0, "Shield_Flat_Korean.step", (600, 0, 0), (0.52, 0.68, 0.78)),
+        # (name, profile_type, chord_len, max_height, barrel_depth, barrel_h, pos, color)
+        ("Shield_Round",       "Round",    170.0, 82.0, 28.0, 38.0, (0,   0, 0), (0.98, 0.80, 0.10)),  # Bright yellow like reel!
+        ("Shield_Hybrid",      "Hybrid",   175.0, 85.0, 26.0, 34.0, (210, 0, 0), (0.96, 0.94, 0.62)),  # Pale yellow like reel!
+        ("Shield_Teardrop",    "Teardrop", 170.0, 85.0, 32.0, 42.0, (420, 0, 0), (0.86, 0.52, 0.65)),
+        ("Shield_Flat_Korean", "Flat",     180.0, 95.0, 16.0, 24.0, (630, 0, 0), (0.52, 0.72, 0.82)),
     ]
 
-    hybrid_shield_shape = None
-    for name, ptype, length, height, thick, fname, pos, col in shield_specs:
-        s_shape = build_giant_shield(ptype, length, height, thick)
+    hybrid_shape = None
+    for name, ptype, clen, mh, bd, bh, pos, col in shield_specs:
+        s = build_curved_shield(ptype, clen, mh, bd, bh)
         if ptype == "Hybrid":
-            hybrid_shield_shape = s_shape
-        add_and_export(name, s_shape, fname, pos=pos, color=col)
+            hybrid_shape = s
+        add_and_export(name, s, name, pos=pos, color=col)
 
-    comp_shape = build_compensator_strip(165.0, 25.0, 5.0)
-    add_and_export(
-        "Shield_Compensator",
-        comp_shape,
-        "Shield_Compensator.step",
-        pos=(800, 25, 0),
-        color=(0.88, 0.72, 0.55),
-    )
+    comp = build_arch_compensator(165.0, 24.0, 5.0)
+    add_and_export("Shield_Compensator", comp, "Shield_Compensator", pos=(840, 0, 0), color=(0.88, 0.72, 0.55))
 
-    print("\n=== Generating Part C: 2-Part PLA Silicone Casting Mold (Hybrid Shield) ===")
-    mold_a, mold_b = build_silicone_mold(hybrid_shield_shape)
-    # Orient Part A cavity face UP (+Z) and Part B lid keys UP (+Z) for easy inspection & flat printing!
-    mold_a_print = mold_a.copy()
-    # Part A currently has flat outer back at Z = z_top and cavity opening at Z = 0 -> flip 180 around X so cavity opens UP
-    bb_a = mold_a_print.BoundBox
-    mold_a_print.rotate(App.Vector(0, 0, 0), App.Vector(1, 0, 0), 180)
-    bb_a2 = mold_a_print.BoundBox
-    mold_a_print.translate(App.Vector(0, -bb_a2.YMin, -bb_a2.ZMin))
-
-    # Part B currently has flat outer back at Z = -lid_thick and keys on Z = 0 pointing +Z -> translate Z so back sits at Z = 0
-    mold_b_print = mold_b.copy()
-    bb_b = mold_b_print.BoundBox
-    mold_b_print.translate(App.Vector(0, -bb_b.YMin, -bb_b.ZMin))
-
-    add_and_export(
-        "Shield_Mold_PartA",
-        mold_a_print,
-        "Shield_Mold_PartA.step",
-        pos=(200, 140, 0),
-        color=(0.35, 0.55, 0.75),
-    )
-    add_and_export(
-        "Shield_Mold_PartB",
-        mold_b_print,
-        "Shield_Mold_PartB.step",
-        pos=(440, 140, 0),
-        color=(0.45, 0.65, 0.85),
-    )
+    print("\n=== Part C: 2-Part PLA Silicone Casting Mold (Curved-Arch Hybrid Shield) ===")
+    mold_a, mold_b = build_curved_silicone_mold(hybrid_shape)
+    add_and_export("Shield_Mold_PartA", mold_a, "Shield_Mold_PartA", pos=(120, 120, 0), color=(0.35, 0.55, 0.75))
+    add_and_export("Shield_Mold_PartB", mold_b, "Shield_Mold_PartB", pos=(380, 120, 0), color=(0.45, 0.65, 0.85))
 
     doc.recompute()
-    fcstd_path = os.path.join(OUT_DIR, "LaLume_Lash_Training_Kit.FCStd")
+    fcstd_path = os.path.join(CAD_DIR, "LaLume_Lash_Training_Kit.FCStd")
     doc.saveAs(fcstd_path)
     print(f"\nSaved FreeCAD document: {fcstd_path}")
-    print(f"Exported {len(exported)} STEP files to: {STEP_DIR}")
 
 
 if __name__ == "__main__" or True:
