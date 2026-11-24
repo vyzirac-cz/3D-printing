@@ -18,6 +18,8 @@ Generates:
 
 import math
 import os
+import re
+import xml.etree.ElementTree as ET
 import FreeCAD as App
 import Part
 import MeshPart
@@ -419,6 +421,192 @@ def build_arch_compensator(chord_len=165.0, height=24.0, thickness=5.0):
 
 
 # ==============================================================================
+# 3B. CURVED-SURFACE SVG LOGO EMBOSSER ("KLASH BEAUTYCARE" BOLD, PRINTABLE)
+# ==============================================================================
+def parse_svg_path_to_wires(d_str, scale):
+    """Parse an SVG path d string (M, L, C, Z) into closed 2D FreeCAD Wires in the XZ plane (viewer-facing +Y)."""
+    tokens = re.findall(r"[MLCZmlcz]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?", d_str)
+    wires = []
+    edges = []
+    cur = None
+    start = None
+    i = 0
+    cmd = None
+
+    def v2(x_s, y_s):
+        # Looking at front (+Y -> -Y): viewer's RIGHT is -X, viewer's UP is +Z
+        return App.Vector(-x_s * scale, 0.0, -y_s * scale)
+
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok.isalpha():
+            cmd = tok
+            i += 1
+            if cmd in ("Z", "z"):
+                if cur is not None and start is not None and (cur - start).Length > 1e-4:
+                    edges.append(Part.LineSegment(cur, start).toShape())
+                if edges:
+                    try:
+                        w = Part.Wire(edges)
+                        if w.isClosed():
+                            wires.append(w)
+                    except Exception:
+                        pass
+                edges = []
+                cur = start
+            continue
+
+        if cmd == "M":
+            if edges:
+                try:
+                    w = Part.Wire(edges)
+                    if w.isClosed():
+                        wires.append(w)
+                except Exception:
+                    pass
+                edges = []
+            x, y = float(tokens[i]), float(tokens[i + 1])
+            i += 2
+            cur = v2(x, y)
+            start = cur
+            cmd = "L"
+        elif cmd == "L":
+            x, y = float(tokens[i]), float(tokens[i + 1])
+            i += 2
+            nxt = v2(x, y)
+            if (nxt - cur).Length > 1e-4:
+                edges.append(Part.LineSegment(cur, nxt).toShape())
+            cur = nxt
+        elif cmd == "C":
+            x1, y1 = float(tokens[i]), float(tokens[i + 1])
+            x2, y2 = float(tokens[i + 2]), float(tokens[i + 3])
+            x3, y3 = float(tokens[i + 4]), float(tokens[i + 5])
+            i += 6
+            p1, p2, p3 = v2(x1, y1), v2(x2, y2), v2(x3, y3)
+            if (p3 - cur).Length > 1e-4:
+                bez = Part.BezierCurve()
+                bez.setPoles([cur, p1, p2, p3])
+                edges.append(bez.toShape())
+            cur = p3
+        else:
+            i += 1
+
+    if edges:
+        try:
+            w = Part.Wire(edges)
+            if w.isClosed():
+                wires.append(w)
+        except Exception:
+            pass
+    return wires
+
+
+def build_curved_logo_solids(svg_path, target_arc_width=126.0, z_base=64.0, relief=0.8, embed=0.8):
+    """
+    Build 3D solid letters from `klash_logo_bold.svg`, wrapped radially onto the front
+    cylindrical surface of the curved shield upper flap (R = Arch_Radius + Upper_Flap_Thickness).
+    Returns a list of valid 3D letter solids ready to fuse onto a shield.
+    """
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+    ns = {"svg": "http://www.w3.org/2000/svg", "xlink": "http://www.w3.org/1999/xlink"}
+
+    # Collect glyph path strings by id
+    glyph_paths = {}
+    for g in root.findall(".//svg:defs//svg:g", ns):
+        gid = g.attrib.get("id")
+        if gid:
+            p = g.find("svg:path", ns)
+            if p is not None and "d" in p.attrib:
+                glyph_paths[gid] = p.attrib["d"]
+
+    # Collect <use> placements
+    uses = []
+    for u in root.findall(".//svg:use", ns):
+        href = u.attrib.get("{http://www.w3.org/1999/xlink}href", "").lstrip("#")
+        if href in glyph_paths:
+            uses.append((href, float(u.attrib["x"]), float(u.attrib["y"])))
+
+    # Measure total SVG width from glyph placements
+    # Approximate each glyph width ~16 units for centering
+    min_x = min(x for _, x, _ in uses)
+    max_x = max(x for _, x, _ in uses) + 15.0
+    svg_w = max_x - min_x
+    svg_cx = 0.5 * (min_x + max_x)
+    scale = target_arc_width / svg_w
+
+    arch_r = PARAMS["Arch_Radius"]
+    r_front = arch_r + PARAMS["Upper_Flap_Thickness"]
+
+    # Cache parsed faces per glyph id (in local XZ plane, centered around glyph's local origin)
+    glyph_face_cache = {}
+    for gid, d_str in glyph_paths.items():
+        wires = parse_svg_path_to_wires(d_str, scale)
+        if not wires:
+            continue
+        faces = []
+        for w in wires:
+            try:
+                f = Part.Face(w)
+                if f.Area > 1e-4:
+                    faces.append(f)
+            except Exception:
+                pass
+        if not faces:
+            continue
+        faces.sort(key=lambda f: f.Area, reverse=True)
+        main_face = faces[0]
+        for hole_f in faces[1:]:
+            main_face = main_face.cut(hole_f)
+        glyph_face_cache[gid] = main_face
+
+    letter_solids = []
+    for gid, ux, uy in uses:
+        if gid not in glyph_face_cache:
+            continue
+        f_local = glyph_face_cache[gid].copy()
+        # Shift local glyph so its horizontal center is at X=0 in local frame
+        bb = f_local.BoundBox
+        local_cx = 0.5 * (bb.XMin + bb.XMax)
+        f_local.translate(App.Vector(-local_cx, 0.0, 0.0))
+
+        # Extrude along +Y from y = -embed (inside shield) to y = +relief (proud of shield)
+        solid = f_local.extrude(App.Vector(0.0, embed + relief, 0.0))
+        solid.translate(App.Vector(0.0, -embed, 0.0))
+
+        # Arc position along cylinder: viewer's LEFT is +theta, viewer's RIGHT is -theta
+        # ux increases to the viewer's RIGHT -> arc_s decreases (goes from +width/2 to -width/2)
+        glyph_svg_x = ux + (-local_cx / scale)
+        arc_s = -(glyph_svg_x - svg_cx) * scale
+        theta = arc_s / r_front
+
+        # Rotate around Z so local +Y aligns with radial outward normal (sin(theta), cos(theta), 0)
+        # Rotation by -theta (in degrees) sends (0, 1, 0) -> (sin(theta), cos(theta), 0)
+        solid.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), -math.degrees(theta))
+        solid.translate(
+            App.Vector(
+                r_front * math.sin(theta),
+                r_front * math.cos(theta) - arch_r,
+                z_base,
+            )
+        )
+        letter_solids.append(solid)
+
+    return letter_solids
+
+
+def apply_logo_to_shield(shield_shape, z_base=64.0):
+    """Fuse the curved 'KLASH BEAUTYCARE' bold logo cleanly onto a shield's upper flap."""
+    svg_path = os.path.join(CAD_DIR, "klash_logo_bold.svg")
+    if not os.path.exists(svg_path):
+        print("  [WARN] Logo SVG not found, skipping emboss.")
+        return shield_shape
+    letters = build_curved_logo_solids(svg_path, target_arc_width=126.0, z_base=z_base, relief=0.8, embed=0.8)
+    result = shield_shape.fuse(letters)
+    return result
+
+
+# ==============================================================================
 # 4. 2-PART PLA SILICONE CASTING MOLD (FOR CURVED-ARCH HYBRID SHIELD)
 # ==============================================================================
 def build_curved_silicone_mold(shield_solid):
@@ -567,6 +755,8 @@ def run():
     hybrid_shape = None
     for name, ptype, clen, mh, bd, bh, pos, col in shield_specs:
         s = build_curved_shield(ptype, clen, mh, bd, bh)
+        logo_z = bh + 7.5  # Centered nicely on the upper flap with >= 7.5 mm clearance above barrel shoulder
+        s = apply_logo_to_shield(s, z_base=logo_z)
         if ptype == "Hybrid":
             hybrid_shape = s
         add_and_export(name, s, name, pos=pos, color=col)
