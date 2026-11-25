@@ -596,13 +596,14 @@ def build_curved_logo_solids(svg_path, target_arc_width=126.0, z_base=64.0, reli
 
 
 def apply_logo_to_shield(shield_shape, z_base=64.0):
-    """Fuse the curved 'KLASH BEAUTYCARE' bold logo cleanly onto a shield's upper flap."""
+    """Engrave/deboss (cut) the curved 'KLASH BEAUTYCARE' bold logo 0.8 mm deep into the shield's upper flap."""
     svg_path = os.path.join(CAD_DIR, "klash_logo_bold.svg")
     if not os.path.exists(svg_path):
-        print("  [WARN] Logo SVG not found, skipping emboss.")
+        print("  [WARN] Logo SVG not found, skipping deboss.")
         return shield_shape
-    letters = build_curved_logo_solids(svg_path, target_arc_width=126.0, z_base=z_base, relief=0.8, embed=0.8)
-    result = shield_shape.fuse(letters)
+    # Cut 0.8 mm deep into the 6.0 mm upper flap (leaving 5.2 mm solid wall), extending 1.0 mm proud for clean boolean cut
+    letters = build_curved_logo_solids(svg_path, target_arc_width=126.0, z_base=z_base, relief=1.0, embed=0.8)
+    result = shield_shape.cut(letters)
     return result
 
 
