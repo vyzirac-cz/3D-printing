@@ -48,6 +48,11 @@ PARAMS = {
     "Mold_Key_Clearance": 0.2,
     "Pour_Spout_Diameter": 8.0,
     "Air_Vent_Diameter": 2.5,
+    # Magnetic Split-Shield parameters (Unimagnet KT-10-02-N: Ø 10 mm x 2 mm, 1.3 kg pull)
+    "Magnet_Diameter": 10.0,
+    "Magnet_Height": 2.0,
+    "Magnet_Dia_Clearance": 0.2,    # 10.2 mm pocket diameter for clean glue/press fit
+    "Magnet_Depth_Clearance": 0.2,  # 2.2 mm pocket depth so magnets sit flush without holding seam open
 }
 
 REPO_DIR = "/home/vyzirac/git/3D-printing/LaLume_Lash_Training_Kit"
@@ -607,6 +612,49 @@ def apply_logo_to_shield(shield_shape, z_base=64.0):
     return result
 
 
+def build_magnetic_split_shield(shield_shape, magnet_yz_positions):
+    """
+    Split a curved giant shield cleanly down the center symmetry plane X = 0 into:
+      - Split_L (X <= 0)
+      - Split_R (X >= 0)
+    Cuts 2 cylindrical magnet pockets (Ø 10.2 mm x 2.2 mm deep) into each mating face
+    for Unimagnet KT-10-02-N (Ø 10 mm x 2 mm) neodymium disc magnets.
+    Both halves stand upright on Z = 0; when separated, the flat X = 0 cut face displays
+    the exact cross-section profile directly to the audience!
+    """
+    bb = shield_shape.BoundBox
+    pad = 25.0
+    box_pos_x = Part.makeBox(
+        bb.XLength + pad, bb.YLength + 2 * pad, bb.ZLength + 2 * pad,
+        App.Vector(0.0, bb.YMin - pad, bb.ZMin - pad),
+    )
+    box_neg_x = Part.makeBox(
+        bb.XLength + pad, bb.YLength + 2 * pad, bb.ZLength + 2 * pad,
+        App.Vector(-(bb.XLength + pad), bb.YMin - pad, bb.ZMin - pad),
+    )
+
+    half_l = shield_shape.cut(box_pos_x)  # keeps X <= 0
+    half_r = shield_shape.cut(box_neg_x)  # keeps X >= 0
+
+    mag_r = (PARAMS["Magnet_Diameter"] + PARAMS["Magnet_Dia_Clearance"]) / 2.0
+    mag_d = PARAMS["Magnet_Height"] + PARAMS["Magnet_Depth_Clearance"]
+
+    for (my, mz) in magnet_yz_positions:
+        # Pocket into Left half (-X direction from X=+0.5 to X=-mag_d)
+        cyl_l = Part.makeCylinder(
+            mag_r, mag_d + 0.5, App.Vector(0.5, my, mz), App.Vector(-1, 0, 0)
+        )
+        half_l = half_l.cut(cyl_l)
+
+        # Pocket into Right half (+X direction from X=-0.5 to X=+mag_d)
+        cyl_r = Part.makeCylinder(
+            mag_r, mag_d + 0.5, App.Vector(-0.5, my, mz), App.Vector(1, 0, 0)
+        )
+        half_r = half_r.cut(cyl_r)
+
+    return half_l, half_r
+
+
 # ==============================================================================
 # 4. 2-PART PLA SILICONE CASTING MOLD (FOR CURVED-ARCH HYBRID SHIELD)
 # ==============================================================================
@@ -753,7 +801,15 @@ def run():
         ("Shield_Hybrid",      "Hybrid",   175.0, 85.0, 29.0, 53.0, (630, 0, 0), (0.96, 0.94, 0.62)),
     ]
 
+    magnet_positions_by_type = {
+        "Round":    [(11.0, 14.0), (11.0, 38.0)],
+        "Teardrop": [(9.0,  16.0), (9.5,  42.0)],
+        "Flat":     [(11.5, 15.0), (11.5, 39.0)],
+        "Hybrid":   [(11.5, 15.0), (11.0, 38.0)],
+    }
+
     hybrid_shape = None
+    split_shields = []
     for name, ptype, clen, mh, bd, bh, pos, col in shield_specs:
         s = build_curved_shield(ptype, clen, mh, bd, bh)
         logo_z = bh + 7.5  # Centered nicely on the upper flap with >= 7.5 mm clearance above barrel shoulder
@@ -761,9 +817,17 @@ def run():
         if ptype == "Hybrid":
             hybrid_shape = s
         add_and_export(name, s, name, pos=pos, color=col)
+        split_shields.append((name, ptype, s, pos, col))
 
     comp = build_arch_compensator(165.0, 24.0, 5.0)
     add_and_export("Shield_Compensator", comp, "Shield_Compensator", pos=(840, 0, 0), color=(0.88, 0.72, 0.55))
+
+    print("\n=== Part B2: Magnetic Split-in-Half Shields (Ø 10 x 2 mm Unimagnet KT-10-02-N) ===")
+    for name, ptype, s_full, pos, col in split_shields:
+        hl, hr = build_magnetic_split_shield(s_full, magnet_positions_by_type[ptype])
+        # Lay out opened by 35 mm in FreeCAD so the cut profile & magnet pockets are clearly visible!
+        add_and_export(f"{name}_Split_L", hl, f"{name}_Split_L", pos=(pos[0] - 18, -95, 0), color=col)
+        add_and_export(f"{name}_Split_R", hr, f"{name}_Split_R", pos=(pos[0] + 18, -95, 0), color=col)
 
     print("\n=== Part C: 2-Part PLA Silicone Casting Mold (Curved-Arch Hybrid Shield) ===")
     mold_a, mold_b = build_curved_silicone_mold(hybrid_shape)

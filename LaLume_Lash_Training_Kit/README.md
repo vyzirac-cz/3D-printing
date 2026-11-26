@@ -38,6 +38,18 @@ Parametric FreeCAD models modeled after real salon **Lash Oasis** curved-arch 2-
 | Flat (Korean Step 1 / L-curl) | [Shield_Flat_Korean.stl](stl/Shield_Flat_Korean.stl) | [Shield_Flat_Korean.step](step/Shield_Flat_Korean.step) | `197.5 × 50.4 × 95.0` |
 | Arch-Matched Compensator Strip | [Shield_Compensator.stl](stl/Shield_Compensator.stl) | [Shield_Compensator.step](step/Shield_Compensator.step) | `170.5 × 29.5 × 30.0` |
 
+### 2B. Magnetic Split-in-Half Shields (For Live Cross-Section Demos)
+Split cleanly down `X = 0` (between letters, zero sliced characters) with **2 × `Ø 10.2 × 2.2 mm` magnet pockets per half** sized for **Unimagnet `KT-10-02-N` (`Ø 10 × 2 mm`, 1.3 kg pull)** neodymium disc magnets (4 magnets per shield, 16 total).
+
+| Profile | Left Half (`STL` / `STEP`) | Right Half (`STL` / `STEP`) |
+| :--- | :---: | :---: |
+| Classic Round | [STL](stl/Shield_Round_Split_L.stl) · [STEP](step/Shield_Round_Split_L.step) | [STL](stl/Shield_Round_Split_R.stl) · [STEP](step/Shield_Round_Split_R.step) |
+| Teardrop | [STL](stl/Shield_Teardrop_Split_L.stl) · [STEP](step/Shield_Teardrop_Split_L.step) | [STL](stl/Shield_Teardrop_Split_R.stl) · [STEP](step/Shield_Teardrop_Split_R.step) |
+| Flat (Korean / L-curl) | [STL](stl/Shield_Flat_Korean_Split_L.stl) · [STEP](step/Shield_Flat_Korean_Split_L.step) | [STL](stl/Shield_Flat_Korean_Split_R.stl) · [STEP](step/Shield_Flat_Korean_Split_R.step) |
+| Hybrid (Slanted Ramp) | [STL](stl/Shield_Hybrid_Split_L.stl) · [STEP](step/Shield_Hybrid_Split_L.step) | [STL](stl/Shield_Hybrid_Split_R.stl) · [STEP](step/Shield_Hybrid_Split_R.step) |
+
+![Magnetic Split Shields](renders/06_magnetic_split_closeup.png)
+
 ### 3. 2-Part PLA Silicone Casting Mold (Curved-Arch Hybrid Shield, Zero Undercuts)
 | Part | Interactive 3D View (GitHub) | Precision Slicing | Notes |
 | :--- | :---: | :---: | :--- |
