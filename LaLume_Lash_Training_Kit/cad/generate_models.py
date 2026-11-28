@@ -614,15 +614,15 @@ def apply_logo_to_shield(shield_shape, z_base=64.0):
 
 def make_fdm_magnet_pocket_tool(my, mz, direction_x, mag_dia=10.0, mag_h=2.0):
     """
-    Build a clean circular FDM-optimized magnet pocket cutting tool along `direction_x` (+1 or -1)
-    at (Y=my, Z=mz) on the X=0 mating face:
-      1. Pure round circle (Ø 10.25 mm) — clean professional look when opened in front of an audience
-      2. 0.6 mm x 45-degree circular lead-in entry chamfer at X=0 (guides magnet without chipping)
-      3. 3 internal triangular crush ribs (0.20 mm radial protrusion at 90, 210, 330 deg)
-         so a 10.0 mm magnet press-fits tightly and stays locked without glue!
+    Build a clean circular FDM-optimized magnet pocket cutting tool sized for 0.4–0.6 mm nozzles:
+      1. Pure round pocket (Ø 10.6 mm) — clean look + room for crush-rib deflection
+      2. 0.6 mm x 45-degree circular lead-in entry chamfer at X=0
+      3. 3 robust cylindrical/rounded crush ribs (Ø 1.8 mm cylinders centered on the wall at
+         90, 210, 330 deg, protruding 0.40 mm inward -> Ø 9.80 mm grip!)
+         Wide enough (1.8 mm) to print crisply even with a 0.6 mm nozzle & 0.25 mm layers!
       4. 2.15 mm depth (flush/0.15 mm sub-flush so seam closes completely tight)
     """
-    r_nom = (mag_dia + 0.25) / 2.0  # 5.125 mm (Ø 10.25 mm base pocket)
+    r_nom = (mag_dia + 0.60) / 2.0  # 5.30 mm (Ø 10.60 mm base pocket)
     depth = mag_h + 0.15            # 2.15 mm sub-flush depth
     chamf = 0.6                     # 0.6 mm x 45 deg entry bevel
     axis = App.Vector(direction_x, 0.0, 0.0)
@@ -640,18 +640,22 @@ def make_fdm_magnet_pocket_tool(my, mz, direction_x, mag_dia=10.0, mag_h=2.0):
     )
     pocket = pocket.fuse(entry_chamfer)
 
-    # Subtract 3 tiny triangular crush-rib notches (120 deg apart) from the cutting tool
-    # -> leaves 3 inward-protruding crush ribs on the printed wall (Ø 9.85 mm effective press-fit!)
-    rib_protrusion = 0.20
-    rib_half_ang = math.radians(5.0)
+    # Subtract 3 rounded cylindrical crush ribs from the cutting tool (120 deg apart)
+    # -> leaves 3 crisp rounded bumps on the printed wall (1.8 mm wide, 0.40 mm inward protrusion -> Ø 9.80 mm grip)
+    rib_r = 0.90            # 1.8 mm wide rounded bump (prints cleanly on 0.6 mm nozzle!)
+    rib_protrusion = 0.40   # protrudes 0.40 mm inward from r_nom=5.30 -> r_grip=4.90 (Ø 9.80 mm)
+    rib_center_r = r_nom - rib_protrusion + rib_r  # 5.80 mm from pocket center
     for deg in (90.0, 210.0, 330.0):
         ang = math.radians(deg)
-        p_tip = App.Vector(direction_x * chamf, my + (r_nom - rib_protrusion) * math.cos(ang), mz + (r_nom - rib_protrusion) * math.sin(ang))
-        p_b1 = App.Vector(direction_x * chamf, my + (r_nom + 0.5) * math.cos(ang - rib_half_ang), mz + (r_nom + 0.5) * math.sin(ang - rib_half_ang))
-        p_b2 = App.Vector(direction_x * chamf, my + (r_nom + 0.5) * math.cos(ang + rib_half_ang), mz + (r_nom + 0.5) * math.sin(ang + rib_half_ang))
-        rib_wire = Part.makePolygon([p_tip, p_b1, p_b2, p_tip])
-        rib_solid = Part.Face(rib_wire).extrude(App.Vector(direction_x * (depth - chamf + 0.5), 0.0, 0.0))
-        pocket = pocket.cut(rib_solid)
+        ry = my + rib_center_r * math.cos(ang)
+        rz = mz + rib_center_r * math.sin(ang)
+        rib_cyl = Part.makeCylinder(
+            rib_r,
+            depth - chamf + 0.5,
+            App.Vector(direction_x * chamf, ry, rz),
+            axis,
+        )
+        pocket = pocket.cut(rib_cyl)
 
     return pocket
 
