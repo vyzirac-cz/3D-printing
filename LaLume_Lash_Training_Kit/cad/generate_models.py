@@ -612,15 +612,66 @@ def apply_logo_to_shield(shield_shape, z_base=64.0):
     return result
 
 
+def make_fdm_magnet_pocket_tool(my, mz, direction_x, mag_dia=10.0, mag_h=2.0):
+    """
+    Build an FDM-optimized horizontal magnet pocket cutting tool along `direction_x` (+1 or -1)
+    at (Y=my, Z=mz) on the X=0 mating face:
+      1. 45-degree teardrop roof (zero overhang sag when printed upright on Z=0!)
+      2. 0.6 mm x 45-degree lead-in entry chamfer at X=0 (guides magnet without chipping)
+      3. 3 internal triangular crush ribs (0.20 mm radial protrusion at 210, 270, 330 deg)
+         so a 10.0 mm magnet press-fits tightly and stays locked without glue!
+      4. 2.15 mm depth (flush/0.15 mm sub-flush so seam closes completely tight)
+    """
+    r_nom = (mag_dia + 0.25) / 2.0  # 5.125 mm (Ø 10.25 mm base pocket)
+    depth = mag_h + 0.15            # 2.15 mm sub-flush depth
+    chamf = 0.6                     # 0.6 mm x 45 deg entry slope
+
+    def teardrop_wire(x_pos, radius):
+        # Circle arc from 135 deg CCW around bottom (270 deg) to 45 deg, plus 45 deg roof apex at +Z
+        p_tr = App.Vector(x_pos, my + radius * math.cos(math.radians(45)), mz + radius * math.sin(math.radians(45)))
+        p_bot = App.Vector(x_pos, my, mz - radius)
+        p_tl = App.Vector(x_pos, my + radius * math.cos(math.radians(135)), mz + radius * math.sin(math.radians(135)))
+        p_apex = App.Vector(x_pos, my, mz + radius * math.sqrt(2.0))
+
+        e_arc = Part.Arc(p_tl, p_bot, p_tr).toShape()
+        e_r1 = Part.makeLine(p_tr, p_apex)
+        e_r2 = Part.makeLine(p_apex, p_tl)
+        return Part.Wire([e_arc, e_r1, e_r2])
+
+    # Main pocket extrusion from X=0 to X = direction_x * depth
+    w_main = teardrop_wire(0.0, r_nom)
+    pocket = Part.Face(w_main).extrude(App.Vector(direction_x * depth, 0.0, 0.0))
+
+    # 45-degree lead-in entry chamfer loft from X = -0.3*dir (clear of X=0) to X = +chamf*dir
+    w_mouth = teardrop_wire(-direction_x * 0.3, r_nom + chamf + 0.3)
+    w_throat = teardrop_wire(direction_x * chamf, r_nom)
+    entry_chamfer = Part.makeLoft([w_mouth, w_throat], True, True)
+    pocket = pocket.fuse(entry_chamfer)
+
+    # Subtract 3 triangular crush-rib notches from the cutting tool
+    # (removing them from the tool LEAVES 3 inward-protruding crush ribs on the printed wall!)
+    rib_protrusion = 0.20  # effective inscribed dia across ribs = 10.25 - 0.40 = 9.85 mm -> crisp press-fit!
+    rib_half_ang = math.radians(5.0)
+    for deg in (210.0, 270.0, 330.0):
+        ang = math.radians(deg)
+        # Triangle in YZ plane: tip at r_nom - rib_protrusion, base outside r_nom + 0.5
+        p_tip = App.Vector(direction_x * chamf, my + (r_nom - rib_protrusion) * math.cos(ang), mz + (r_nom - rib_protrusion) * math.sin(ang))
+        p_b1 = App.Vector(direction_x * chamf, my + (r_nom + 0.5) * math.cos(ang - rib_half_ang), mz + (r_nom + 0.5) * math.sin(ang - rib_half_ang))
+        p_b2 = App.Vector(direction_x * chamf, my + (r_nom + 0.5) * math.cos(ang + rib_half_ang), mz + (r_nom + 0.5) * math.sin(ang + rib_half_ang))
+        rib_wire = Part.makePolygon([p_tip, p_b1, p_b2, p_tip])
+        rib_solid = Part.Face(rib_wire).extrude(App.Vector(direction_x * (depth - chamf + 0.5), 0.0, 0.0))
+        pocket = pocket.cut(rib_solid)
+
+    return pocket
+
+
 def build_magnetic_split_shield(shield_shape, magnet_yz_positions):
     """
     Split a curved giant shield cleanly down the center symmetry plane X = 0 into:
       - Split_L (X <= 0)
       - Split_R (X >= 0)
-    Cuts 2 cylindrical magnet pockets (Ø 10.2 mm x 2.2 mm deep) into each mating face
-    for Unimagnet KT-10-02-N (Ø 10 mm x 2 mm) neodymium disc magnets.
-    Both halves stand upright on Z = 0; when separated, the flat X = 0 cut face displays
-    the exact cross-section profile directly to the audience!
+    Cuts 2 FDM-optimized magnet pockets (teardrop roof + 45 deg entry chamfer + 3 crush ribs)
+    into each mating face for Unimagnet KT-10-02-N (Ø 10 mm x 2 mm) neodymium disc magnets.
     """
     bb = shield_shape.BoundBox
     pad = 25.0
@@ -636,21 +687,15 @@ def build_magnetic_split_shield(shield_shape, magnet_yz_positions):
     half_l = shield_shape.cut(box_pos_x)  # keeps X <= 0
     half_r = shield_shape.cut(box_neg_x)  # keeps X >= 0
 
-    mag_r = (PARAMS["Magnet_Diameter"] + PARAMS["Magnet_Dia_Clearance"]) / 2.0
-    mag_d = PARAMS["Magnet_Height"] + PARAMS["Magnet_Depth_Clearance"]
+    mag_dia = PARAMS["Magnet_Diameter"]
+    mag_h = PARAMS["Magnet_Height"]
 
     for (my, mz) in magnet_yz_positions:
-        # Pocket into Left half (-X direction from X=+0.5 to X=-mag_d)
-        cyl_l = Part.makeCylinder(
-            mag_r, mag_d + 0.5, App.Vector(0.5, my, mz), App.Vector(-1, 0, 0)
-        )
-        half_l = half_l.cut(cyl_l)
+        pocket_l = make_fdm_magnet_pocket_tool(my, mz, -1.0, mag_dia, mag_h)
+        half_l = half_l.cut(pocket_l)
 
-        # Pocket into Right half (+X direction from X=-0.5 to X=+mag_d)
-        cyl_r = Part.makeCylinder(
-            mag_r, mag_d + 0.5, App.Vector(-0.5, my, mz), App.Vector(1, 0, 0)
-        )
-        half_r = half_r.cut(cyl_r)
+        pocket_r = make_fdm_magnet_pocket_tool(my, mz, 1.0, mag_dia, mag_h)
+        half_r = half_r.cut(pocket_r)
 
     return half_l, half_r
 
