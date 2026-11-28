@@ -614,47 +614,38 @@ def apply_logo_to_shield(shield_shape, z_base=64.0):
 
 def make_fdm_magnet_pocket_tool(my, mz, direction_x, mag_dia=10.0, mag_h=2.0):
     """
-    Build an FDM-optimized horizontal magnet pocket cutting tool along `direction_x` (+1 or -1)
+    Build a clean circular FDM-optimized magnet pocket cutting tool along `direction_x` (+1 or -1)
     at (Y=my, Z=mz) on the X=0 mating face:
-      1. 45-degree teardrop roof (zero overhang sag when printed upright on Z=0!)
-      2. 0.6 mm x 45-degree lead-in entry chamfer at X=0 (guides magnet without chipping)
-      3. 3 internal triangular crush ribs (0.20 mm radial protrusion at 210, 270, 330 deg)
+      1. Pure round circle (Ø 10.25 mm) — clean professional look when opened in front of an audience
+      2. 0.6 mm x 45-degree circular lead-in entry chamfer at X=0 (guides magnet without chipping)
+      3. 3 internal triangular crush ribs (0.20 mm radial protrusion at 90, 210, 330 deg)
          so a 10.0 mm magnet press-fits tightly and stays locked without glue!
       4. 2.15 mm depth (flush/0.15 mm sub-flush so seam closes completely tight)
     """
     r_nom = (mag_dia + 0.25) / 2.0  # 5.125 mm (Ø 10.25 mm base pocket)
     depth = mag_h + 0.15            # 2.15 mm sub-flush depth
-    chamf = 0.6                     # 0.6 mm x 45 deg entry slope
+    chamf = 0.6                     # 0.6 mm x 45 deg entry bevel
+    axis = App.Vector(direction_x, 0.0, 0.0)
 
-    def teardrop_wire(x_pos, radius):
-        # Circle arc from 135 deg CCW around bottom (270 deg) to 45 deg, plus 45 deg roof apex at +Z
-        p_tr = App.Vector(x_pos, my + radius * math.cos(math.radians(45)), mz + radius * math.sin(math.radians(45)))
-        p_bot = App.Vector(x_pos, my, mz - radius)
-        p_tl = App.Vector(x_pos, my + radius * math.cos(math.radians(135)), mz + radius * math.sin(math.radians(135)))
-        p_apex = App.Vector(x_pos, my, mz + radius * math.sqrt(2.0))
+    # Clean round main pocket from X=0 to X = direction_x * depth
+    pocket = Part.makeCylinder(r_nom, depth, App.Vector(0.0, my, mz), axis)
 
-        e_arc = Part.Arc(p_tl, p_bot, p_tr).toShape()
-        e_r1 = Part.makeLine(p_tr, p_apex)
-        e_r2 = Part.makeLine(p_apex, p_tl)
-        return Part.Wire([e_arc, e_r1, e_r2])
-
-    # Main pocket extrusion from X=0 to X = direction_x * depth
-    w_main = teardrop_wire(0.0, r_nom)
-    pocket = Part.Face(w_main).extrude(App.Vector(direction_x * depth, 0.0, 0.0))
-
-    # 45-degree lead-in entry chamfer loft from X = -0.3*dir (clear of X=0) to X = +chamf*dir
-    w_mouth = teardrop_wire(-direction_x * 0.3, r_nom + chamf + 0.3)
-    w_throat = teardrop_wire(direction_x * chamf, r_nom)
-    entry_chamfer = Part.makeLoft([w_mouth, w_throat], True, True)
+    # 45-degree circular lead-in entry chamfer from X = -0.3*dir to X = +chamf*dir
+    entry_chamfer = Part.makeCone(
+        r_nom + chamf + 0.3,
+        r_nom,
+        chamf + 0.3,
+        App.Vector(-direction_x * 0.3, my, mz),
+        axis,
+    )
     pocket = pocket.fuse(entry_chamfer)
 
-    # Subtract 3 triangular crush-rib notches from the cutting tool
-    # (removing them from the tool LEAVES 3 inward-protruding crush ribs on the printed wall!)
-    rib_protrusion = 0.20  # effective inscribed dia across ribs = 10.25 - 0.40 = 9.85 mm -> crisp press-fit!
+    # Subtract 3 tiny triangular crush-rib notches (120 deg apart) from the cutting tool
+    # -> leaves 3 inward-protruding crush ribs on the printed wall (Ø 9.85 mm effective press-fit!)
+    rib_protrusion = 0.20
     rib_half_ang = math.radians(5.0)
-    for deg in (210.0, 270.0, 330.0):
+    for deg in (90.0, 210.0, 330.0):
         ang = math.radians(deg)
-        # Triangle in YZ plane: tip at r_nom - rib_protrusion, base outside r_nom + 0.5
         p_tip = App.Vector(direction_x * chamf, my + (r_nom - rib_protrusion) * math.cos(ang), mz + (r_nom - rib_protrusion) * math.sin(ang))
         p_b1 = App.Vector(direction_x * chamf, my + (r_nom + 0.5) * math.cos(ang - rib_half_ang), mz + (r_nom + 0.5) * math.sin(ang - rib_half_ang))
         p_b2 = App.Vector(direction_x * chamf, my + (r_nom + 0.5) * math.cos(ang + rib_half_ang), mz + (r_nom + 0.5) * math.sin(ang + rib_half_ang))
