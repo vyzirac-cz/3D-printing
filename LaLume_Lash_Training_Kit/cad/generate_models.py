@@ -614,23 +614,18 @@ def apply_logo_to_shield(shield_shape, z_base=64.0):
 
 def make_fdm_magnet_pocket_tool(my, mz, direction_x, mag_dia=10.0, mag_h=2.0):
     """
-    Build a clean circular FDM-optimized magnet pocket cutting tool sized for 0.4–0.6 mm nozzles:
-      1. Pure round pocket (Ø 10.6 mm) — clean look + room for crush-rib deflection
-      2. 0.6 mm x 45-degree circular lead-in entry chamfer at X=0
-      3. 3 robust cylindrical/rounded crush ribs (Ø 1.8 mm cylinders centered on the wall at
-         90, 210, 330 deg, protruding 0.40 mm inward -> Ø 9.80 mm grip!)
-         Wide enough (1.8 mm) to print crisply even with a 0.6 mm nozzle & 0.25 mm layers!
-      4. 2.15 mm depth (flush/0.15 mm sub-flush so seam closes completely tight)
+    Build a clean, tight full-360-degree circular magnet pocket along `direction_x` (+1 or -1)
+    at (Y=my, Z=mz) on the X=0 mating face for Unimagnet KT-10-02-N (Ø 10 mm x 2 mm):
+      1. Full 360-degree snug round pocket (Ø 10.15 mm) — maximum wall contact & retention
+      2. Subtle 0.4 mm x 45-degree entry bevel at X=0 (guides magnet in smoothly without chipping)
+      3. 2.15 mm depth (flush/0.15 mm sub-flush so seam closes completely tight)
     """
-    r_nom = (mag_dia + 0.60) / 2.0  # 5.30 mm (Ø 10.60 mm base pocket)
+    r_nom = (mag_dia + 0.15) / 2.0  # 5.075 mm (Ø 10.15 mm snug 360-deg fit)
     depth = mag_h + 0.15            # 2.15 mm sub-flush depth
-    chamf = 0.6                     # 0.6 mm x 45 deg entry bevel
+    chamf = 0.4                     # subtle 0.4 mm x 45 deg lead-in bevel
     axis = App.Vector(direction_x, 0.0, 0.0)
 
-    # Clean round main pocket from X=0 to X = direction_x * depth
     pocket = Part.makeCylinder(r_nom, depth, App.Vector(0.0, my, mz), axis)
-
-    # 45-degree circular lead-in entry chamfer from X = -0.3*dir to X = +chamf*dir
     entry_chamfer = Part.makeCone(
         r_nom + chamf + 0.3,
         r_nom,
@@ -638,26 +633,7 @@ def make_fdm_magnet_pocket_tool(my, mz, direction_x, mag_dia=10.0, mag_h=2.0):
         App.Vector(-direction_x * 0.3, my, mz),
         axis,
     )
-    pocket = pocket.fuse(entry_chamfer)
-
-    # Subtract 3 rounded cylindrical crush ribs from the cutting tool (120 deg apart)
-    # -> leaves 3 crisp rounded bumps on the printed wall (1.8 mm wide, 0.40 mm inward protrusion -> Ø 9.80 mm grip)
-    rib_r = 0.90            # 1.8 mm wide rounded bump (prints cleanly on 0.6 mm nozzle!)
-    rib_protrusion = 0.40   # protrudes 0.40 mm inward from r_nom=5.30 -> r_grip=4.90 (Ø 9.80 mm)
-    rib_center_r = r_nom - rib_protrusion + rib_r  # 5.80 mm from pocket center
-    for deg in (90.0, 210.0, 330.0):
-        ang = math.radians(deg)
-        ry = my + rib_center_r * math.cos(ang)
-        rz = mz + rib_center_r * math.sin(ang)
-        rib_cyl = Part.makeCylinder(
-            rib_r,
-            depth - chamf + 0.5,
-            App.Vector(direction_x * chamf, ry, rz),
-            axis,
-        )
-        pocket = pocket.cut(rib_cyl)
-
-    return pocket
+    return pocket.fuse(entry_chamfer)
 
 
 def build_magnetic_split_shield(shield_shape, magnet_yz_positions):
